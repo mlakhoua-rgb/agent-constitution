@@ -128,11 +128,14 @@ flowchart LR
     KB -.->|next session starts here| S
 ```
 
-Every artifact in that loop is a file in the repo. Nothing load-bearing lives in chat: a session
-that ends leaves its evidence exactly where the next agent — a different model, a different
-vendor, zero shared memory — begins. The state row, decision entry, and handoff ride in the PR
-only when the change makes them owed — write-with-the-work, not write-every-time; a PR that
-changes no project state says so with the `state:no-change` label instead.
+Every knowledge artifact in that loop is a file in the repo — nothing load-bearing lives in chat:
+a session that ends leaves its evidence exactly where the next agent (a different model, a
+different vendor, zero shared memory) begins. The review trail itself — verdict stamps,
+approvals, CI results, the `state:no-change` label — lives in the forge's PR record rather than
+in git; that is deliberate: the verdict stamp exists precisely to make that trail searchable
+later. The state row, decision entry, and handoff ride in the PR only when the change makes them
+owed — write-with-the-work, not write-every-time; a PR that changes no project state says so with
+the `state:no-change` label instead.
 
 ---
 
