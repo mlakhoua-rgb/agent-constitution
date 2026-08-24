@@ -28,7 +28,7 @@ that keeps running while quietly doing the wrong thing.
 
 ## Stage 1 — Constitution + decision log
 
-**Files:** `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`
+**Files:** `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`, `.github/ISSUE_TEMPLATE/`, `scripts/`
 
 The highest value-to-effort ratio in the whole framework. An afternoon of work.
 
@@ -39,6 +39,18 @@ The highest value-to-effort ratio in the whole framework. An afternoon of work.
    three-line pointer** at the canonical file. Never a copy — copies drift, and an agent will
    confidently cite the stale one.
 3. Start `docs/DECISIONS.md` with your **next real decision**.
+4. Copy `.github/ISSUE_TEMPLATE/` and **create the label its truth-gap template names** — GitHub
+   silently drops a label the repo doesn't have, and the constitution's "record a `truth-gap`
+   Issue" rule depends on that label being findable:
+
+   ```bash
+   gh label create truth-gap --color B60205 --description "Two sources of truth disagree"
+   ```
+
+5. Copy `scripts/` now, even though its stages come later. `session_brief.py` and
+   `review_zero.py` are standalone and useful from day one; only `librarian.py` expects Stage 4's
+   `STATE.md`. The alternative — a constitution citing scripts that aren't in the tree — is a
+   broken citation in the one document every agent reads first.
 
 > **Do not backfill decision history.** It will be reconstructed wrong — from memory, from commit
 > messages, from what feels like it must have happened — and then cited as fact by every agent
@@ -109,7 +121,15 @@ losing track of.
    point of the stage.
 3. Run `scripts/librarian.py --check` on a daily schedule. Route its output somewhere a human
    actually sees.
-4. Add `state-guard.yml` **last**.
+4. Add `state-guard.yml` **last** — and create its escape-hatch label first:
+
+   ```bash
+   gh label create state:no-change --color ededed --description "This PR changes no project state"
+   ```
+
+   The gate's pass path for a no-state-change PR *is* that label. A gate whose escape hatch
+   doesn't exist fails closed with no documented way out — for every PR, including the ones that
+   genuinely change nothing — and a gate like that gets disabled within a week.
 
 > **Expected on a fresh clone:** `librarian.py --check` exits non-zero, reporting that §NOW,
 > §NEXT, and §ACTIVE WORKSTREAMS carry no `as-of:` stamp. That is the tool working — the shipped

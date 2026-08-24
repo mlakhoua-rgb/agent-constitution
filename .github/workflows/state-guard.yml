@@ -9,6 +9,12 @@ name: STATE Guard
 # satisfy — the label is one click — because its job is to force a five-second
 # DECISION ("did this change project state?"), not to create work. A gate that is
 # expensive to satisfy gets routed around; this one gets answered.
+#
+# SETUP (once per repo, BEFORE enabling this gate):
+#   gh label create state:no-change --color ededed --description "This PR changes no project state"
+# The label is the gate's only pass path for a no-state-change PR; a gate whose
+# escape hatch doesn't exist fails closed with no way out. Also edit `branches:`
+# below if your default branch is not `main`.
 
 on:
   pull_request:
@@ -56,5 +62,5 @@ jobs:
             echo "docs/STATE.md touched — pass"
             exit 0
           fi
-          echo "::error title=STATE Guard::This PR neither touches docs/STATE.md nor carries the state:no-change label. Update your workstream row in docs/STATE.md in this PR (write-with-the-work), or add the state:no-change label if project state is genuinely unchanged."
+          echo "::error title=STATE Guard::This PR neither touches docs/STATE.md nor carries the state:no-change label. Update your workstream row in docs/STATE.md in this PR (write-with-the-work), or add the state:no-change label if project state is genuinely unchanged. (Label missing from the repo? Create it once: gh label create state:no-change)"
           exit 1

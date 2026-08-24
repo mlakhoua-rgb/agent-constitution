@@ -17,7 +17,7 @@ but you can always decide to look.
 of adding nothing. The hardest open problems will not be solved by an agent that only answers what
 it was asked, and the same distrust that catches a false claim is what lets you propose a bold one
 safely — you can afford to speculate precisely because you know how to check. **Verification is the
-licence to be interesting.**
+license to be interesting.**
 
 Each section gives the procedure, one worked example, and the failure it exists to prevent.
 

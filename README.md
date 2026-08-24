@@ -114,6 +114,26 @@ See [`docs/reference/review-contract.md`](docs/reference/review-contract.md).
 
 ---
 
+## The shape of one change
+
+```mermaid
+flowchart LR
+    S["session_brief.py<br>generated truth"] --> W["work<br>VERIFIED / INFERRED / ASSUMED"]
+    W --> R0["Round 0<br>review_zero.py +<br>adversarial diff read"]
+    R0 --> PR["one PR<br>diff + state row +<br>decision entry + handoff"]
+    PR --> CI["CI<br>review-zero · state-guard · tests"]
+    CI --> REV["independent review<br>verdict stamp ·<br>iteration budget"]
+    REV --> MG["merge gate<br>all findings resolved ·<br>approval on latest commit"]
+    MG --> KB["knowledge base<br>decision appended ·<br>handoff frozen"]
+    KB -.->|next session starts here| S
+```
+
+Every artifact in that loop is a file in the repo. Nothing load-bearing lives in chat: a session
+that ends leaves its evidence exactly where the next agent — a different model, a different
+vendor, zero shared memory — begins.
+
+---
+
 ## The part people underestimate: the craft layer
 
 The documents above tell an agent *what is true and what it may do*. They do not teach it *how to
@@ -142,10 +162,12 @@ It closes with two failure taxonomies that are, for most teams, the immediately 
 CLAUDE.md                                  The constitution template
 AGENTS.md                                  Tool-neutral entry point (points at the constitution)
 ADOPTION.md                                How to adopt incrementally — read this second
+CONTRIBUTING.md                            The bar for changes to the framework itself
 docs/
   DECISIONS.md                             Append-only decision log + entry contract
   STATE.md                                 Volatile state ledger + freshness contract
   handoffs/TEMPLATE.md                     Session evidence record
+  archive/                                 Read-only history — never current
   reference/
     agent-operating-manual.md              The craft layer
     review-contract.md                     Review gates, verdict stamps, iteration budget
@@ -178,9 +200,9 @@ marked `<LIKE THIS>`.
 - **The overhead is real and is only worth paying above a threshold.** For a solo project with one
   agent and reversible changes, most of this is cost with no benefit. See
   [`ADOPTION.md`](ADOPTION.md) for what to adopt first and what to skip.
-- **The scripts are reference implementations**, deliberately dependency-free and lightly scoped.
-  They are meant to be forked and extended with checks mined from *your* review history, not used
-  as-is.
+- **The scripts are reference implementations** — standard library only, Python 3.10+,
+  deliberately lightly scoped. They are meant to be forked and extended with checks mined from
+  *your* review history, not used as-is.
 
 ---
 
@@ -190,6 +212,14 @@ marked `<LIKE THIS>`.
 2. Copy `CLAUDE.md` and `AGENTS.md` to your repo root; fill the `<PLACEHOLDERS>`.
 3. Start `docs/DECISIONS.md` with your next real decision. Do not backfill history.
 4. Add `state-guard.yml` only once the state ledger is genuinely being used.
+
+---
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the details. The short version: every mechanism here must
+name the silent failure it prevents — additions and deletions alike are judged by that bar — and
+this repo runs its own gates, so your PR will meet `review-zero` and `state-guard` on the way in.
 
 ---
 

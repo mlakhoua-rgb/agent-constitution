@@ -8,7 +8,7 @@
 - [ ] `chore` / `docs` — no logic change
 - [ ] `feat` — new feature
 - [ ] `fix` — bug fix
-- [ ] `refactor` — code restructure, no behaviour change
+- [ ] `refactor` — code restructure, no behavior change
 
 ## Verification
 - [ ] **Not needed** — chore/docs only
