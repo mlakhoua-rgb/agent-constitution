@@ -1,0 +1,60 @@
+name: STATE Guard
+
+# Enforces the write-with-the-work rule: every PR must either update
+# docs/STATE.md (the project-memory anchor) or explicitly declare "no project
+# state change" via the state:no-change label.
+#
+# WHY A CI GATE AND NOT A CONVENTION: a state doc maintained as a separate chore
+# is a state doc that stops being maintained. The gate is deliberately trivial to
+# satisfy — the label is one click — because its job is to force a five-second
+# DECISION ("did this change project state?"), not to create work. A gate that is
+# expensive to satisfy gets routed around; this one gets answered.
+
+on:
+  pull_request:
+    # `edited` covers base-branch retargeting; `ready_for_review` covers drafts
+    # that never re-synchronize after being opened.
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited, ready_for_review]
+    branches: [main]
+
+# Label and synchronize events arrive in bursts, and each fires a full run.
+# Without a concurrency group, superseded runs pile up and wedge the queue.
+concurrency:
+  group: state-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  state-touched:
+    name: STATE.md touched or state:no-change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Exempt by PR AUTHOR, not actor: on labeled/unlabeled events the actor is
+    # whoever touched the label, which would break the bot exemption.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    steps:
+      - name: Check STATE.md touched or label present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Read labels from the pulls object: covered by pull-requests:read.
+          # (The issues/{n}/labels endpoint needs issues:read, which the explicit
+          # permissions block above deliberately does not grant.)
+          labels=$(gh api "repos/${REPO}/pulls/${PR}" --jq '.labels[].name')
+          if grep -qxF 'state:no-change' <<<"$labels"; then
+            echo "state:no-change label present — pass"
+            exit 0
+          fi
+          files=$(gh api "repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename')
+          if grep -qxF 'docs/STATE.md' <<<"$files"; then
+            echo "docs/STATE.md touched — pass"
+            exit 0
+          fi
+          echo "::error title=STATE Guard::This PR neither touches docs/STATE.md nor carries the state:no-change label. Update your workstream row in docs/STATE.md in this PR (write-with-the-work), or add the state:no-change label if project state is genuinely unchanged."
+          exit 1

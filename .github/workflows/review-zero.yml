@@ -1,0 +1,45 @@
+name: Review Zero
+
+# Runs the MECHANICAL half of the Round-0 self-review in CI.
+#
+# This is a backstop, not the gate. The author is expected to have run
+# `python scripts/review_zero.py` locally BEFORE pushing — a finding caught in
+# Round 0 costs minutes; the same finding caught in Round 3 costs a full review
+# cycle plus a context reload for both parties.
+#
+# The adversarial half of Round 0 — reading the full diff against
+# .github/agent-review-guidelines.md — cannot be scripted and is not covered here.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: review-zero-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review-zero:
+    name: Mechanical Round-0 checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the checks diff against the merge base, and a shallow
+          # clone silently produces an empty diff — which would report CLEAN and
+          # be indistinguishable from a genuinely clean PR.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run review-zero
+        run: |
+          python scripts/review_zero.py \
+            --base "origin/${{ github.event.pull_request.base.ref }}" \
+            --ci
