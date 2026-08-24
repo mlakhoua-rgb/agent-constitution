@@ -5,6 +5,9 @@ agents. For a service task, also read its applicable `services/<service>/CLAUDE.
 
 ---
 
+<!-- Template note: when you adopt this file, keep only the section ABOVE the rule. Everything
+     below is addressed to the template reader, not to your repo's agents. -->
+
 **Why this file is three lines.** Different agent tools look for different filenames
 (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.cursorrules`). The
 temptation is to write real content into each one. Don't — the moment there are two copies, they

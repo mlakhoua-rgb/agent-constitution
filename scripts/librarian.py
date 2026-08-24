@@ -12,11 +12,13 @@ What it does:
   2. Stamps / clears STALE banners on STATE.md sections whose `as-of` date
      exceeds its TTL class.
   3. Regenerates docs/handoffs/INDEX.md so every handoff is reachable.
-  4. Checks every markdown link under docs/ + CLAUDE.md. Broken links in
-     STATE.md and INDEX.md are HARD failures; elsewhere they are warnings.
+  4. Checks every markdown link under docs/ plus the root-level *.md entry
+     points (README, CLAUDE.md, ADOPTION, …). Broken links in STATE.md and
+     INDEX.md are HARD failures; elsewhere they are warnings.
   5. Reports ORPHANS — docs not reachable from STATE.md by following links.
      An unreachable doc is a doc that gets rewritten from scratch by the next
-     agent who needs it.
+     agent who needs it. Root-level files are entry points, not orphan
+     candidates; docs/archive/ is exempt because unreachable is the point.
   6. Enforces the STATE.md size budget (bytes AND per-line length).
 
      Budget BYTES, not lines. A line cap is trivially satisfiable by
@@ -202,9 +204,9 @@ def build_index() -> str:
 
 def md_files() -> list[Path]:
     files = [p for p in DOCS.rglob("*.md")] if DOCS.exists() else []
-    root_claude = REPO / "CLAUDE.md"
-    if root_claude.exists():
-        files.append(root_claude)
+    # Root-level entry points (README, CLAUDE.md, ADOPTION, …) rot exactly like
+    # docs/ does, and they are the files a first-time reader hits first.
+    files += sorted(REPO.glob("*.md"))
     return files
 
 
@@ -258,7 +260,9 @@ def find_orphans() -> list[str]:
     orphans = []
     for p in md_files():
         rel = p.relative_to(REPO).as_posix()
-        if rel in ORPHAN_EXEMPT or "archive/" in rel:
+        # Root-level files are entry points, not orphan candidates; archive/ is
+        # exempt because unreachable is the point.
+        if "/" not in rel or rel in ORPHAN_EXEMPT or "archive/" in rel:
             continue
         if p.resolve() not in reachable:
             orphans.append(rel)
