@@ -39,9 +39,11 @@ The highest value-to-effort ratio in the whole framework. An afternoon of work.
    three-line pointer** at the canonical file. Never a copy — copies drift, and an agent will
    confidently cite the stale one.
 3. Start `docs/DECISIONS.md` with your **next real decision**.
-4. Copy `.github/ISSUE_TEMPLATE/` and **create the label its truth-gap template names** — GitHub
-   silently drops a label the repo doesn't have, and the constitution's "record a `truth-gap`
-   Issue" rule depends on that label being findable:
+4. Copy `.github/ISSUE_TEMPLATE/` and **create the label its truth-gap template names** — a
+   template label that doesn't exist in the repo is silently not applied (VERIFIED against
+   [GitHub's issue-template syntax docs](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms):
+   labels must already exist in the repository to be added), and the constitution's "record a
+   `truth-gap` Issue" rule depends on that label being findable:
 
    ```bash
    gh label create truth-gap --color B60205 --description "Two sources of truth disagree"

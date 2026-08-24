@@ -120,7 +120,7 @@ See [`docs/reference/review-contract.md`](docs/reference/review-contract.md).
 flowchart LR
     S["session_brief.py<br>generated truth"] --> W["work<br>VERIFIED / INFERRED / ASSUMED"]
     W --> R0["Round 0<br>review_zero.py +<br>adversarial diff read"]
-    R0 --> PR["one PR<br>diff + state row +<br>decision entry + handoff"]
+    R0 --> PR["one PR<br>diff + every doc it made stale<br>(state row · decision · handoff)"]
     PR --> CI["CI<br>review-zero · state-guard · tests"]
     CI --> REV["independent review<br>verdict stamp ·<br>iteration budget"]
     REV --> MG["merge gate<br>all findings resolved ·<br>approval on latest commit"]
@@ -130,7 +130,9 @@ flowchart LR
 
 Every artifact in that loop is a file in the repo. Nothing load-bearing lives in chat: a session
 that ends leaves its evidence exactly where the next agent — a different model, a different
-vendor, zero shared memory — begins.
+vendor, zero shared memory — begins. The state row, decision entry, and handoff ride in the PR
+only when the change makes them owed — write-with-the-work, not write-every-time; a PR that
+changes no project state says so with the `state:no-change` label instead.
 
 ---
 
