@@ -12,7 +12,9 @@ import re
 from dataclasses import dataclass
 
 SECTION_RE = re.compile(r"^## ([A-Z][A-Z /]+?)(?:\s*—\s*(.*))?\s*$")
-AS_OF_RE = re.compile(r"as-of:\s*(\d{4}-\d{2}-\d{2})")
+# Negative lookbehind so a malformed marker like `not-as-of:` — where
+# `as-of:` appears only as a substring — doesn't parse as the real thing.
+AS_OF_RE = re.compile(r"(?<![\w-])as-of:\s*(\d{4}-\d{2}-\d{2})")
 
 
 @dataclass(frozen=True)
@@ -119,7 +121,11 @@ def workstream_freshness(
             # (which would swallow the whole table without ever failing).
             header_checked = True
             normalized = [re.sub(r"[^a-z0-9]+", " ", c.lower()).strip() for c in cells]
-            if "workstream" in normalized and "as of" in normalized:
+            # Exactly one of each required column — a duplicate (e.g. two
+            # `as-of` columns) is just as malformed as a missing one:
+            # `dict(zip(columns, cells))` below would silently keep only the
+            # last cell, hiding a stale value in the first nominal column.
+            if normalized.count("workstream") == 1 and normalized.count("as of") == 1:
                 columns = normalized
                 header_seen = True
             else:

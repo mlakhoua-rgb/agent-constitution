@@ -195,3 +195,35 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-6 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 7 — Codex re-review on commit `afd344b` found three more issues
+
+- **P1 — the round-6 line-skip fix could hide a citation the PR actually broke.** Skipping an entire
+  edited line (round 6) exempted every reference on it, not just the one the edit touched — a line
+  edited for an unrelated reason that still carried an untouched, now-broken citation verbatim would
+  be skipped by the impact scan, and `check_added_citations` also misses it whenever the deleted
+  target's containing directory was removed too (its own directory-exists heuristic goes empty-handed).
+  `check_impacted_references` no longer skips by line; it now compares each individual link
+  target/citation against a base-content set (resolved link targets, `(path, num)` citation pairs)
+  built from that same document at `base`, and only exempts a reference that doesn't appear there
+  verbatim — an untouched reference still matches exactly and gets checked; an edited/new one won't
+  match and is already covered by `check_added_md_links`/`check_added_citations`. This removes the
+  `added` parameter entirely — reference-level comparison needs no line-membership tracking. See
+  `review_zero.py`, `test_unrelated_edit_on_same_line_does_not_hide_a_broken_citation`.
+- **P1 — `not-as-of:` parsed as a valid `as-of:` stamp.** `AS_OF_RE` searched for `as-of:` anywhere in
+  the heading metadata with no boundary, so a malformed marker like `## NOW — not-as-of: 2026-08-24`
+  matched on the substring and was read as fresh. Added a negative lookbehind so a preceding word
+  character or hyphen (as in `not-as-of:`) blocks the match. See `state_contract.py`,
+  `test_not_as_of_marker_is_not_parsed_as_a_valid_stamp`.
+- **P1 — a duplicated required table column silently picked one value.** The header-presence check
+  only asked whether `workstream`/`as-of` were *present* in the normalized column list, so a header
+  like `| Workstream | as-of | as-of |` passed; `dict(zip(columns, cells))` then kept only the last
+  `as-of` cell, hiding a stale value in the first nominal date column behind a fresh second one. The
+  check now requires exactly one of each required column, not merely "at least one" — a duplicate
+  fails the header the same way a missing column already did. See `state_contract.py`,
+  `test_duplicate_required_workstream_column_is_flagged_not_swallowed`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (25/25) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-7 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

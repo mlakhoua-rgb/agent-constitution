@@ -248,29 +248,31 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
     return found
 
 
-def check_impacted_references(
-    base: str, change: Impact, added: dict[str, list[tuple[int, str]]]
-) -> list[Finding]:
+def check_impacted_references(base: str, change: Impact) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
     if not change.deleted and not change.shrunk and not change.deleted_dirs and not change.restructured:
         return []
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
-    added_linenos = {doc: {ln for ln, _ in rows} for doc, rows in added.items()}
     for doc in sorted(p for p in current_paths if p.endswith(".md")):
         doc_dir = posixpath.dirname(doc)
-        doc_added = added_linenos.get(doc, set())
+        base_text = "\n".join(markdown_lines(base, doc))
+        # Scope the "is this reference actually inherited from base?" check
+        # to the reference itself, not the line it sits on — a line can be
+        # edited for an unrelated reason while carrying over an untouched
+        # citation/link verbatim, and a line-level skip would hide that
+        # citation from impact scanning entirely (check_added_* only catches
+        # it if the target's *containing directory* also still exists).
+        base_targets = {
+            posixpath.normpath(posixpath.join(doc_dir, clean))
+            for target in MD_LINK_RE.findall(base_text)
+            if not re.match(r"^(https?:|mailto:|#|<)", target)
+            for clean in [target.split("#", 1)[0].strip()]
+            if clean
+        }
+        base_citations = set(CITATION_RE.findall(base_text))
         for lineno, text in enumerate(markdown_lines("HEAD", doc), 1):
             if IGNORE_TOKEN in text:
-                continue
-            if lineno in doc_added:
-                # This line's links/citations were written or edited by this
-                # PR — check_added_md_links/check_added_citations already
-                # validate them against current HEAD directly. Re-running the
-                # base-relative shift/deletion check here would fail an
-                # already-correct citation the PR just repaired (e.g.
-                # updating `src/foo.py:3` to `src/foo.py:2` after an earlier
-                # deletion in the same commit).
                 continue
             for target in MD_LINK_RE.findall(text):
                 if re.match(r"^(https?:|mailto:|#|<)", target):
@@ -279,12 +281,24 @@ def check_impacted_references(
                 if not clean:
                     continue
                 resolved = posixpath.normpath(posixpath.join(doc_dir, clean))
+                if resolved not in base_targets:
+                    # This exact link target isn't inherited from base — it's
+                    # new or edited content already validated against current
+                    # HEAD by check_added_md_links.
+                    continue
                 if resolved in change.deleted or resolved in change.deleted_dirs:
                     found.append(Finding(
                         "FAIL", "md-link-impact", doc, lineno,
                         f"existing link `{target}` targets `{resolved}`, deleted/renamed by this PR",
                     ))
             for cited, num in CITATION_RE.findall(text):
+                if (cited, num) not in base_citations:
+                    # Same reasoning as links: an untouched citation carries
+                    # the exact same (path, line-number) pair over from base.
+                    # A changed one — including a repair the PR made to a
+                    # citation shifted by its own earlier edit — won't match
+                    # and is already covered by check_added_citations.
+                    continue
                 if cited in change.deleted:
                     found.append(Finding(
                         "FAIL", "citation-impact", doc, lineno,
@@ -420,7 +434,7 @@ def main() -> int:
     findings: list[Finding] = []
     findings += check_added_citations(added)
     findings += check_added_md_links(added)
-    findings += check_impacted_references(base, change, added)
+    findings += check_impacted_references(base, change)
     findings += check_status_grammar(added)
     findings += check_migrations(base, added)
     findings += check_param_defaults(added)

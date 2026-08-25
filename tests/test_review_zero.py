@@ -80,6 +80,26 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_unrelated_edit_on_same_line_does_not_hide_a_broken_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("Some prose. See src/foo.py:1.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the only file under src/ (removing the directory from the
+        # HEAD tree entirely) and, in the same commit, edit the doc line for
+        # an unrelated reason while leaving the citation itself untouched.
+        # A line-level skip would hide this: check_added_citations also
+        # misses it because `src` no longer exists as a directory either.
+        (root / "src" / "foo.py").unlink()
+        (root / "docs" / "a.md").write_text("Some fixed prose. See src/foo.py:1.\n", encoding="utf-8")
+        self.commit(root, "delete src/foo.py and unrelated prose edit")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
     def test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()
