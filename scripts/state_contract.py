@@ -160,6 +160,12 @@ def workstream_freshness(
         # just yield an empty row set — that reads as "no workstreams to
         # check" instead of "the entire row-level freshness guard is gone".
         out.append(Freshness("ACTIVE WORKSTREAMS section", None, None, ttl_days, "workstream"))
+    elif not header_checked:
+        # The heading survived but every `|` table line under it — header
+        # included — was removed, so no header candidate was ever seen.
+        # Distinct from the malformed-header case (a header row present but
+        # missing the required columns), which already reports itself.
+        out.append(Freshness("ACTIVE WORKSTREAMS table", None, None, ttl_days, "workstream"))
 
     return out
 

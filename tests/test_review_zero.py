@@ -80,6 +80,24 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_deletion_strictly_after_cited_line_does_not_false_positive(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Deleting the line *after* the cited line ("four") does not move
+        # what line 3 ("three") names. Git's zero-context hunk for a pure
+        # deletion anchors `new_start` on the line *preceding* the cut
+        # (`@@ -4,1 +3,0 @@`), which an inclusive `new_start <= num` check
+        # would misread as "at or before line 3" and false-positive on.
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfive\n", encoding="utf-8")
+        self.commit(root, "delete the line after the citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_restructured_non_shrinking_file_shifts_existing_citation(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

@@ -121,10 +121,20 @@ def citation_line_shifted(base: str, path: str, num: int) -> bool:
     what that line number now points at, even though `num` is still within
     the new EOF — e.g. deleting an earlier line shifts every later line up
     by one, so an unchanged citation number now names different content."""
-    return any(
-        old_count != new_count and new_start <= num
-        for old_start, old_count, new_start, new_count in file_hunks(base, path)
-    )
+    for _old_start, old_count, new_start, new_count in file_hunks(base, path):
+        if old_count == new_count:
+            continue
+        # A pure deletion (new_count == 0) anchors new_start on the new-file
+        # line *preceding* the removed content — e.g. deleting old line 4
+        # from a file produces `@@ -4 +3,0 @@`, meaning the cut sits strictly
+        # after line 3, not at-or-before it. Anything up to and including
+        # new_start is untouched; only lines after it can have shifted.
+        # A hunk that adds content (new_count > 0) instead spans real new
+        # lines starting at new_start, so that boundary is inclusive there.
+        boundary = new_start if new_count > 0 else new_start + 1
+        if num >= boundary:
+            return True
+    return False
 
 
 def added_lines(base: str) -> dict[str, list[tuple[int, str]]]:

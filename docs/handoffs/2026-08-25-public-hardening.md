@@ -145,3 +145,27 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-4 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 5 — Codex re-review on commit `9ad5919` found two more issues
+
+- **P1 — a workstream table removed out from under a surviving heading was invisible.** The round-4
+  presence check only asked whether `## ACTIVE WORKSTREAMS` was seen at all; if the heading survived
+  but every `|` table line beneath it — header row included — was deleted, `header_checked` stayed
+  `False` with no record emitted for it, same blind spot one level down. Now: heading absent → invalid
+  "section" record (round 4, unchanged); heading present but no table line ever seen → a new invalid
+  "table" record; heading and a header row present but the columns are wrong → existing "malformed
+  header" record (round 2, unchanged). See `state_contract.py`,
+  `test_workstream_section_with_no_table_is_flagged_not_dropped`.
+- **P1 — the round-3/4 shift check false-positived on a deletion strictly after the citation.** Git's
+  zero-context hunk for a pure deletion anchors `new_start` on the new-file line *preceding* the cut
+  (deleting old line 4 produces `@@ -4 +3,0 @@`), so the inclusive `new_start <= num` check treated
+  "deleted right after line 3" the same as "deleted at or before line 3" and failed an unaffected
+  citation. `citation_line_shifted` now computes a boundary that's exclusive for zero-length deletion
+  hunks (`new_start + 1`) and inclusive for hunks that add real content (`new_start`), matching where
+  the cut or insertion actually sits. See `review_zero.py`,
+  `test_deletion_strictly_after_cited_line_does_not_false_positive`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (19/19) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-5 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
