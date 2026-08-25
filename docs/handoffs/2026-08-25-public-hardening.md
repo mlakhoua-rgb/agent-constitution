@@ -40,3 +40,34 @@ Codex review was separately requested with `@codex review`; merge remains blocke
 has evaluated the latest commit, per the review contract.
 
 Public-hardening implementation is validated by CI on PR #2 · STATUS: VALIDATED · evidence: PR #2 / workflow runs `32843448222`, `32843448167`.
+
+## Round 1 — Codex review findings closed
+
+The requested `@codex review` on commit `2427097874139aaf03da963037cca2bca4d6985c` returned three
+findings, all fixed in this PR with a regression test each:
+
+- **P1 — future freshness stamps read as fresh.** `state_contract._age` computed
+  `(today - stamp).days` unconditionally, so a stamp with a future year (e.g. a `2036` typo) produced
+  a negative age that both `session_brief.py` and `librarian.py --check` treat as "not stale" since
+  it is never greater than the TTL. `_age` now returns `None` for any stamp later than `today`, which
+  both consumers already render as "no valid as-of date". See `state_contract.py`,
+  `test_future_stamp_is_not_treated_as_fresh`.
+- **P1 — truncated populated workstream rows vanish.** A populated row with fewer cells than the
+  header (a dropped trailing column, e.g. a missing `as-of` cell) was matched by
+  `len(cells) < len(columns)` and skipped outright, so `librarian.py --check` never saw — and never
+  failed — that row. Truncated rows are now right-padded with empty cells before parsing, so a
+  missing `as-of` value surfaces as a normal freshness failure instead of disappearing from the
+  record set. See `state_contract.py`, `test_truncated_populated_row_is_not_silently_dropped`.
+- **P2 — directory links survive their last file's deletion.** `Impact.deleted` only ever held file
+  paths from `git diff --name-status`, so a link to a directory (e.g. `[docs](guide/)`) whose last
+  tracked file was deleted in a deletion-only diff resolved clean: the directory path was never in
+  `deleted`. `impact()` now also derives `deleted_dirs` as the set difference between the base and
+  HEAD directory trees, and `check_impacted_references` treats a link resolving into either set as
+  broken. See `review_zero.py`, `test_deleting_last_file_in_directory_breaks_existing_directory_link`.
+
+All three regressions are encoded under `tests/` and pass locally
+(`python -m unittest discover -s tests -v`); `scripts/review_zero.py --base origin/main` reports
+`0 FAIL` on the round-1 commit (one pre-existing size WARN, unrelated to this scope).
+
+Codex round-1 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED
+· evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

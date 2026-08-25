@@ -51,6 +51,7 @@ class Finding:
 class Impact:
     deleted: frozenset[str]
     shrunk: frozenset[str]
+    deleted_dirs: frozenset[str]
 
 
 def git(*args: str) -> str:
@@ -138,7 +139,12 @@ def impact(base: str) -> Impact:
         after = blob_line_count("HEAD", path)
         if before is not None and after is not None and after < before:
             shrunk.add(path)
-    return Impact(frozenset(deleted), frozenset(shrunk))
+
+    # A directory link (e.g. `[docs](docs/)`) is invalidated when the last
+    # file that kept it in the tree is deleted, even though no path in
+    # `deleted` names the directory itself — derive that from the tree diff.
+    deleted_dirs = tree_dirs(base) - tree_dirs("HEAD")
+    return Impact(frozenset(deleted), frozenset(shrunk), frozenset(deleted_dirs))
 
 
 def markdown_lines(ref: str, path: str) -> list[str]:
@@ -193,7 +199,7 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
 
 def check_impacted_references(change: Impact) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
-    if not change.deleted and not change.shrunk:
+    if not change.deleted and not change.shrunk and not change.deleted_dirs:
         return []
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
@@ -209,7 +215,7 @@ def check_impacted_references(change: Impact) -> list[Finding]:
                 if not clean:
                     continue
                 resolved = posixpath.normpath(posixpath.join(doc_dir, clean))
-                if resolved in change.deleted:
+                if resolved in change.deleted or resolved in change.deleted_dirs:
                     found.append(Finding(
                         "FAIL", "md-link-impact", doc, lineno,
                         f"existing link `{target}` targets `{resolved}`, deleted/renamed by this PR",
@@ -361,8 +367,11 @@ def main() -> int:
         print(
             f"review-zero: base={base} · {len(added)} file(s) with added lines · {n_lines} added line(s)"
         )
-        if change.deleted or change.shrunk:
-            print(f"impact scan: {len(change.deleted)} deleted/renamed · {len(change.shrunk)} shrunk target(s)")
+        if change.deleted or change.shrunk or change.deleted_dirs:
+            print(
+                f"impact scan: {len(change.deleted)} deleted/renamed · {len(change.shrunk)} shrunk target(s) · "
+                f"{len(change.deleted_dirs)} deleted dir(s)"
+            )
         for finding in findings:
             where = f"{finding.path}:{finding.line}" if finding.path != "<diff>" else finding.path
             print(f"  [{finding.level}] {finding.cls:<18} {where}\n           {finding.message}")

@@ -62,6 +62,20 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_deleting_last_file_in_directory_breaks_existing_directory_link(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "guide").mkdir()
+        (root / "docs" / "a.md").write_text("[guide](guide/)\n", encoding="utf-8")
+        (root / "docs" / "guide" / "only.md").write_text("# only\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        (root / "docs" / "guide" / "only.md").unlink()
+        self.commit(root, "delete last file in guide/")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("md-link-impact", result.stdout)
+
     def test_unrelated_deletion_does_not_surface_old_unrelated_debt(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

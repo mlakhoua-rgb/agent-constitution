@@ -28,9 +28,14 @@ def _age(stamp: str | None, today: dt.date) -> int | None:
     if not stamp:
         return None
     try:
-        return (today - dt.date.fromisoformat(stamp)).days
+        parsed = dt.date.fromisoformat(stamp)
     except ValueError:
         return None
+    if parsed > today:
+        # A future stamp is never valid evidence of freshness — a typo'd
+        # year (e.g. 2036 instead of 2026) must not read as "0 days old".
+        return None
+    return (today - parsed).days
 
 
 def section_freshness(
@@ -88,8 +93,15 @@ def workstream_freshness(
 
         if all(re.fullmatch(r":?-{3,}:?", c.replace(" ", "")) for c in cells):
             continue
-        if not cells or len(cells) < len(columns):
+        if not cells:
             continue
+        if len(cells) < len(columns):
+            # A populated row with fewer cells than the header (a dropped
+            # trailing column) must still be validated, not vanish from the
+            # record set — pad the missing trailing cells as empty so a
+            # missing `as-of` value surfaces as a freshness failure instead
+            # of silently disappearing.
+            cells = cells + [""] * (len(columns) - len(cells))
 
         row = dict(zip(columns, cells))
         name = row.get("workstream", "").strip("` ")

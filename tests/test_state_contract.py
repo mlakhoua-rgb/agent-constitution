@@ -46,6 +46,33 @@ class StateContractTests(unittest.TestCase):
         self.assertIsNone(records[0].stamp)
         self.assertIsNone(records[0].age_days)
 
+    def test_future_stamp_is_not_treated_as_fresh(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| `payments` | agent | active | `2036-08-25` | x |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].stamp, "2036-08-25")
+        self.assertIsNone(records[0].age_days)
+
+    def test_truncated_populated_row_is_not_silently_dropped(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| payments | agent | active | detail |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].name, "payments")
+        self.assertIsNone(records[0].stamp)
+        self.assertIsNone(records[0].age_days)
+
     def test_active_workstreams_heading_does_not_need_fake_section_stamp(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS
