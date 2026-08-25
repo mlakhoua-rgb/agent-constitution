@@ -5,7 +5,7 @@ codebase** without losing control of what is true, what was decided, and what ha
 verified.
 
 This is not a prompt collection and not an agent framework. It is the **governance layer** that
-sits above whichever agents you use — the documents, contracts, and CI gates that make agent
+sits above whichever agents you use — the documents, contracts, tests, and CI gates that make agent
 output reviewable, attributable, and safe to merge.
 
 ---
@@ -42,12 +42,14 @@ One short, stable, **tool-neutral** document (`CLAUDE.md`, aliased by `AGENTS.md
 *only* routing, authority, and non-negotiable rules. It does not contain runbooks, architecture,
 or current state — those rot at a different rate and live elsewhere.
 
+The filename is not a statement that Claude has special authority. `CLAUDE.md` is canonical here
+because some tools auto-discover that filename; the **content and authority are vendor-neutral**.
+Thin entry points such as `AGENTS.md` point at the same constitution rather than duplicating it.
+Rename the canonical file only after verifying that every target agent reliably follows the
+indirection — discovery behavior is part of the safety contract, not cosmetic naming.
+
 It has an **amendment rule**: it changes only with the Owner's approval and a new entry in the
 decision log. That is what makes it citable six months later.
-
-> **Why tool-neutral matters.** The moment you have two agent vendors, per-tool instruction files
-> guarantee drift. One canonical file, with thin per-tool entry points pointing at it, means every
-> agent is governed by the same text.
 
 ### 2. Documents separated by volatility, not by topic
 
@@ -73,38 +75,44 @@ cites.
 Hand-maintained mirrors of live state rot silently and measurably. In the system this was
 extracted from, one audit found the majority of hand-written cross-references had gone stale.
 The fix was to replace "read the state doc first" with "run the state *script* first" —
-`scripts/session_brief.py` derives repo tip, migration head, open PRs, and doc freshness live,
-then points at the small hand-written surfaces that remain authoritative for *intent*.
+`scripts/session_brief.py` derives repository state, open-PR context, current-branch CI when an open
+PR exists, migration head, and document freshness live, then points at the small hand-written
+surfaces that remain authoritative for *intent*.
 
-Humans and agents hand-write **decisions and intent**. Everything else is generated.
+Humans and agents hand-write **decisions and intent**. Everything else is generated when practical.
 
-### 4. Evidence grammar — claims carry their provenance
+### 4. Evidence grammar — material claims carry provenance
 
-Every claim goes in one of three bins, **labeled in the deliverable itself**:
+Material claims — claims whose truth could change a decision or action — go in one of three bins,
+**labeled in the deliverable itself**:
 
 - **VERIFIED** — you looked; you can cite `file:line`, a query, or a command output.
 - **INFERRED** — follows from verified facts by reasoning you state.
 - **ASSUMED** — you need it true and have not checked. Ships with its blast radius attached.
 
-Consequential claims additionally carry a machine-greppable stamp:
+Ordinary connective prose does not need audit markup. Uniform labeling destroys the signal the
+labels exist to preserve.
+
+Consequential claims that outlive the session additionally carry a machine-greppable stamp:
 
 ```
 <claim> · STATUS: CANDIDATE|VALIDATED|REJECTED · evidence: <path>
 ```
 
-A claim with no evidence path is not actionable — including the agent's own. See
-[`docs/reference/evidence-grammar.md`](docs/reference/evidence-grammar.md).
+See [`docs/reference/evidence-grammar.md`](docs/reference/evidence-grammar.md).
 
 ### 5. Review is a contract, not a vibe
 
 - **Round 0** — the author self-reviews their own full diff as an adversary *before* pushing.
-  Half of it is mechanical ([`scripts/review_zero.py`](scripts/review_zero.py)); half cannot be
-  scripted and is still mandatory.
+  The deterministic half is regression tests plus
+  [`scripts/review_zero.py`](scripts/review_zero.py); the judgment half cannot be scripted and is
+  still mandatory.
 - **An independent reviewer is required on every PR**, including PRs authored by the reviewer's
   own vendor.
 - **A verdict comment is mandatory on every review, even a clean one** — otherwise a clean PR is
   indistinguishable from one nothing reviewed.
-- **A well-evidenced author rebuttal closes a thread.** Reviewers are advisory; evidence wins.
+- **An evidence-backed author rebuttal can resolve a finding for iteration accounting.** It does
+  **not** manufacture the independent reviewer's green light on the latest commit.
 - **Reviewers review the code that is there, not the code they would have written.** A reviewer
   that taxes novelty trains the author out of it.
 - **An iteration budget** with a tripwire — if round 4 shows a flat finding count, the problem is
@@ -114,14 +122,32 @@ See [`docs/reference/review-contract.md`](docs/reference/review-contract.md).
 
 ---
 
+## The mechanical gate is impact-aware
+
+"Added lines only" is useful for local semantic checks because pre-existing debt must not block an
+unrelated PR. It is **not** sufficient for referential integrity.
+
+`review_zero.py` therefore uses two scopes:
+
+- **Added-line checks** for newly introduced malformed stamps, links, citations, migration defects,
+  and configured hot-path patterns.
+- **Impact checks** for existing inbound references when the PR deletes, renames, or shrinks a
+  target. A deletion-only diff can therefore fail if it breaks an existing Markdown link or makes
+  an existing `path:line` citation point past EOF.
+
+The regression suite under `tests/` includes those cases explicitly. This is deliberate: executable
+governance claims need tests just like production logic does.
+
+---
+
 ## The shape of one change
 
 ```mermaid
 flowchart LR
-    S["session_brief.py<br>generated truth"] --> W["work<br>VERIFIED / INFERRED / ASSUMED"]
-    W --> R0["Round 0<br>review_zero.py +<br>adversarial diff read"]
+    S["session_brief.py<br>generated truth"] --> W["work<br>material claims labeled"]
+    W --> R0["Round 0<br>tests + review_zero.py +<br>adversarial diff read"]
     R0 --> PR["one PR<br>diff + every doc it made stale<br>(state row · decision · handoff)"]
-    PR --> CI["CI<br>review-zero · state-guard · tests"]
+    PR --> CI["CI<br>tests · review-zero · state-guard"]
     CI --> REV["independent review<br>verdict stamp ·<br>iteration budget"]
     REV --> MG["merge gate<br>all findings resolved ·<br>approval on latest commit"]
     MG --> KB["knowledge base<br>decision appended ·<br>handoff frozen"]
@@ -132,10 +158,9 @@ Every knowledge artifact in that loop is a file in the repo — nothing load-bea
 a session that ends leaves its evidence exactly where the next agent (a different model, a
 different vendor, zero shared memory) begins. The review trail itself — verdict stamps,
 approvals, CI results, the `state:no-change` label — lives in the forge's PR record rather than
-in git; that is deliberate: the verdict stamp exists precisely to make that trail searchable
-later. The state row, decision entry, and handoff ride in the PR only when the change makes them
-owed — write-with-the-work, not write-every-time; a PR that changes no project state says so with
-the `state:no-change` label instead.
+in git; that is deliberate. The state row, decision entry, and handoff ride in the PR only when the
+change makes them owed — write-with-the-work, not write-every-time; a PR that changes no project
+state says so with the `state:no-change` label instead.
 
 ---
 
@@ -164,10 +189,11 @@ It closes with two failure taxonomies that are, for most teams, the immediately 
 ## What's in this repo
 
 ```
-CLAUDE.md                                  The constitution template
+CLAUDE.md                                  Canonical constitution template (vendor-neutral content)
 AGENTS.md                                  Tool-neutral entry point (points at the constitution)
 ADOPTION.md                                How to adopt incrementally — read this second
 CONTRIBUTING.md                            The bar for changes to the framework itself
+SECURITY.md                                How to report security issues in the public repo
 docs/
   DECISIONS.md                             Append-only decision log + entry contract
   STATE.md                                 Volatile state ledger + freshness contract
@@ -183,11 +209,15 @@ docs/
   ISSUE_TEMPLATE/truth_gap.md              For source-of-truth contradictions
   ISSUE_TEMPLATE/backlog_item.md
   workflows/state-guard.yml                Enforces write-with-the-work
-  workflows/review-zero.yml                Runs the mechanical pre-push gate in CI
+  workflows/review-zero.yml                Runs tests + mechanical Round-0 gate in CI
 scripts/
-  session_brief.py                         Generated session-start read
-  review_zero.py                           Mechanical half of Round-0 self-review
-  librarian.py                             Daily doc freshness / link / orphan / budget pass
+  session_brief.py                         Generated session-start repository/GitHub/CI read
+  state_contract.py                        Shared STATE freshness parser
+  review_zero.py                           Impact-aware mechanical half of Round 0
+  librarian.py                             Daily freshness / link / orphan / budget pass
+tests/
+  test_review_zero.py                      Referential-integrity and migration regressions
+  test_state_contract.py                   Section and per-workstream TTL regressions
 ```
 
 Every template is written to be **adopted and edited**, not read and admired. Placeholders are
@@ -206,8 +236,9 @@ marked `<LIKE THIS>`.
   agent and reversible changes, most of this is cost with no benefit. See
   [`ADOPTION.md`](ADOPTION.md) for what to adopt first and what to skip.
 - **The scripts are reference implementations** — standard library only, Python 3.10+,
-  deliberately lightly scoped. They are meant to be forked and extended with checks mined from
-  *your* review history, not used as-is.
+  deliberately scoped. The repo regression-tests the behaviors it claims, but adopters are still
+  expected to mine additional checks from *their* own review history rather than treating this as
+  a universal verifier.
 
 ---
 
@@ -216,7 +247,9 @@ marked `<LIKE THIS>`.
 1. Read [`ADOPTION.md`](ADOPTION.md) — it gives a staged path rather than an all-at-once install.
 2. Copy `CLAUDE.md` and `AGENTS.md` to your repo root; fill the `<PLACEHOLDERS>`.
 3. Start `docs/DECISIONS.md` with your next real decision. Do not backfill history.
-4. Add `state-guard.yml` only once the state ledger is genuinely being used.
+4. Run `python -m unittest discover -s tests -v` and `python scripts/review_zero.py` after adapting
+   the reference implementation.
+5. Add `state-guard.yml` only once the state ledger is genuinely being used.
 
 ---
 
@@ -224,7 +257,14 @@ marked `<LIKE THIS>`.
 
 [`CONTRIBUTING.md`](CONTRIBUTING.md) has the details. The short version: every mechanism here must
 name the silent failure it prevents — additions and deletions alike are judged by that bar — and
-this repo runs its own gates, so your PR will meet `review-zero` and `state-guard` on the way in.
+this repo runs its own tests and gates on the way in.
+
+---
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md) for responsible reporting. Please do not publish exploit details
+in a public Issue when the problem could enable unsafe merges, CI bypass, or repository compromise.
 
 ---
 
