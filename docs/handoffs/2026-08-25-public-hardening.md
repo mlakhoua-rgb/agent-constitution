@@ -30,7 +30,13 @@ Close the public-review findings against the reference implementation and its co
 
 ## Verification
 
-CI on the pull request is the authoritative execution check for this branch. Until it passes, the
-implementation remains candidate.
+On PR #2, both required workflows passed on commit `2427097874139aaf03da963037cca2bca4d6985c`:
 
-Public-hardening implementation complete on branch `fix/public-hardening-final` · STATUS: CANDIDATE · evidence: `docs/handoffs/2026-08-25-public-hardening.md`
+- Review Zero run `32843448222`: regression tests **success** and mechanical Round-0 **success**.
+- STATE Guard run `32843448167`: `STATE.md touched or state:no-change` **success**.
+
+This evidence validates the executable claims covered by those tests and gates. The independent
+Codex review was separately requested with `@codex review`; merge remains blocked until that review
+has evaluated the latest commit, per the review contract.
+
+Public-hardening implementation is validated by CI on PR #2 · STATUS: VALIDATED · evidence: PR #2 / workflow runs `32843448222`, `32843448167`.
