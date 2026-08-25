@@ -70,5 +70,4 @@ All three regressions are encoded under `tests/` and pass locally
 (`python -m unittest discover -s tests -v`); `scripts/review_zero.py --base origin/main` reports
 `0 FAIL` on the round-1 commit (one pre-existing size WARN, unrelated to this scope).
 
-Codex round-1 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED
-· evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+Codex round-1 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
