@@ -1,0 +1,432 @@
+# Handoff — public hardening
+
+**Date:** 2026-08-25
+
+## Scope
+
+Close the public-review findings against the reference implementation and its contracts:
+
+- deletion/rename/shrink referential-integrity blind spot in `review_zero.py`;
+- ACTIVE WORKSTREAMS TTL mismatch between prose and implementation;
+- missing regression tests for executable governance claims;
+- over-broad VERIFIED / INFERRED / ASSUMED labeling language;
+- vendor-neutral content vs. `CLAUDE.md` filename ambiguity;
+- docs/chore verification contradiction in the PR template;
+- `session_brief.py` claiming CI truth without checking current-branch CI;
+- rebuttal-resolution vs. independent-approval ambiguity;
+- missing public security-reporting policy.
+
+## Material implementation decisions
+
+- Local semantic mechanical checks remain scoped to added lines, but referential-integrity checks
+  inspect existing inbound references when a target is deleted, renamed, or shrunk. This preserves
+  blast-radius isolation without allowing deletion-only false-cleans.
+- STATE freshness parsing is centralized in `scripts/state_contract.py`; NOW/NEXT use heading dates,
+  while ACTIVE WORKSTREAMS rows are checked independently from their own `as-of` cells.
+- Regression tests use only `unittest` and temporary git repositories to preserve the project's
+  Python 3.10+ / standard-library-only contract.
+- `CLAUDE.md` remains canonical for auto-discovery compatibility; the docs now state explicitly
+  that filename discovery and governance authority are separate concerns.
+
+## Verification
+
+On PR #2, both required workflows passed on commit `2427097874139aaf03da963037cca2bca4d6985c`:
+
+- Review Zero run `32843448222`: regression tests **success** and mechanical Round-0 **success**.
+- STATE Guard run `32843448167`: `STATE.md touched or state:no-change` **success**.
+
+This evidence validates the executable claims covered by those tests and gates. The independent
+Codex review was separately requested with `@codex review`; merge remains blocked until that review
+has evaluated the latest commit, per the review contract.
+
+Public-hardening implementation is validated by CI on PR #2 · STATUS: VALIDATED · evidence: PR #2 / workflow runs `32843448222`, `32843448167`.
+
+## Round 1 — Codex review findings closed
+
+The requested `@codex review` on commit `2427097874139aaf03da963037cca2bca4d6985c` returned three
+findings, all fixed in this PR with a regression test each:
+
+- **P1 — future freshness stamps read as fresh.** `state_contract._age` computed
+  `(today - stamp).days` unconditionally, so a stamp with a future year (e.g. a `2036` typo) produced
+  a negative age that both `session_brief.py` and `librarian.py --check` treat as "not stale" since
+  it is never greater than the TTL. `_age` now returns `None` for any stamp later than `today`, which
+  both consumers already render as "no valid as-of date". See `state_contract.py`,
+  `test_future_stamp_is_not_treated_as_fresh`.
+- **P1 — truncated populated workstream rows vanish.** A populated row with fewer cells than the
+  header (a dropped trailing column, e.g. a missing `as-of` cell) was matched by
+  `len(cells) < len(columns)` and skipped outright, so `librarian.py --check` never saw — and never
+  failed — that row. Truncated rows are now right-padded with empty cells before parsing, so a
+  missing `as-of` value surfaces as a normal freshness failure instead of disappearing from the
+  record set. See `state_contract.py`, `test_truncated_populated_row_is_not_silently_dropped`.
+- **P2 — directory links survive their last file's deletion.** `Impact.deleted` only ever held file
+  paths from `git diff --name-status`, so a markdown link whose target is a directory (e.g. a
+  `guide/` path) that lost its last tracked file in a deletion-only diff resolved clean: the
+  directory path was never in `deleted`. `impact()` now also derives `deleted_dirs` as the set
+  difference between the base and HEAD directory trees, and `check_impacted_references` treats a
+  link resolving into either set as broken. See `review_zero.py`,
+  `test_deleting_last_file_in_directory_breaks_existing_directory_link`.
+
+All three regressions are encoded under `tests/` and pass locally
+(`python -m unittest discover -s tests -v`); `scripts/review_zero.py --base origin/main` reports
+`0 FAIL` on the round-1 commit (one pre-existing size WARN, unrelated to this scope).
+
+Codex round-1 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 2 — Codex re-review on commit `1c397d4` found two more issues
+
+- **P1 — the round-1 handoff bullet's own illustrative directory-link example broke Review Zero.**
+  Writing the directory-link example as literal bracket/parenthesis markdown-link syntax made
+  `review_zero.py`'s own added-line link check parse it as a real link to a nonexistent path,
+  failing the required CI job. Reworded to describe the target in prose (commit `faccb40`); the
+  same commit also joined a wrapped `STATUS`/`evidence:` line that was tripping the status-grammar
+  WARN for the identical single-line-scan reason (commit `4d32f5e`).
+- **P1 — a malformed ACTIVE WORKSTREAMS header disables the whole row-level guard.** Every
+  unrecognized `|`-prefixed line in the section was retried as a header candidate forever, so a
+  misspelled or edited header column (e.g. `as-of` becoming `asof`) never set `header_seen` — no
+  row underneath it, however stale, was ever parsed as data, and `librarian.py --check` reported no
+  failures at all for that table. Only the first table row in the section is now treated as a
+  header candidate; if it doesn't declare the required columns, that is itself reported as an
+  invalid freshness record instead of the whole table silently vanishing. See `state_contract.py`,
+  `test_malformed_workstream_header_is_flagged_not_swallowed`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-2 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, this handoff.
+
+## Round 3 — Codex re-review on commit `e803167` found three more issues
+
+- **P1 — a populated workstream row without a name cell is dropped, not flagged.** The nameless-row
+  skip used the same branch as the unfilled `<name>` template placeholder, so a real row that lost
+  its first cell (still carrying owner/status/date/detail data) vanished from the record set exactly
+  like an intentionally-empty template row does. The template placeholder (`name.startswith("<")`)
+  is still skipped silently; any other populated-but-nameless row now emits an invalid freshness
+  record instead. See `state_contract.py`, `test_populated_row_without_name_is_flagged_not_dropped`.
+- **P1 — a missing or misspelled required section heading produces no record at all.**
+  `section_freshness` only ever emitted a record when it found a matching heading, so a deleted or
+  misspelled `## NOW` disappeared from the output with fresh NOW/NEXT surrounding it hiding nothing
+  — there was no failure to see. The function now tracks which required keys were actually matched
+  and synthesizes an invalid record for any that never appeared (the `ACTIVE WORKSTREAMS` heading
+  still counts as present without needing its own stamp, since its freshness comes from
+  `workstream_freshness`). See `state_contract.py`, `test_missing_required_section_is_flagged_not_dropped`.
+- **P1 — a citation surviving EOF can still point at shifted content.** The shrink check only
+  compared the cited line number against the new end-of-file, so a deletion earlier in the file that
+  shifts every later line up by one (e.g. line 3 used to be "three", now names what was line 4) read
+  as clean whenever the number stayed within bounds. `check_impacted_references` now also inspects
+  the file's diff hunks: any hunk with an unequal old/new line count at or before the cited line
+  number marks the citation as impacted, not just an out-of-bounds one. See `review_zero.py`,
+  `test_shrunk_source_with_earlier_deletion_shifts_existing_citation`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (15/15) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-3 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 4 — Codex re-review on commit `32d410e` found two more issues
+
+- **P1 — the round-3 citation-shift check only ran on files that net-shrank.** `citation_line_shifted`
+  was gated on `cited in change.shrunk`, so a file that lost a line before an existing citation but
+  also gained a line elsewhere (net same size, or even growing) never entered `shrunk` and the check
+  never ran, even though the cited line number now names different content. `impact()` now derives a
+  separate `restructured` set from any file with at least one diff hunk whose old/new line counts
+  differ — independent of net file size — and the shift check runs whenever a cited file is in either
+  set; the EOF-exceeded check stays scoped to `shrunk` specifically, since only a net-shrinking file
+  can newly break that bound. See `review_zero.py`,
+  `test_restructured_non_shrinking_file_shifts_existing_citation`.
+- **P1 — deleting the ACTIVE WORKSTREAMS heading itself disables the whole row-level guard.** Both
+  consumers' required-section maps (`SECTION_TTLS`) only ever listed `NOW`/`NEXT`; `workstream_freshness`
+  had no presence check of its own, so a deleted or misspelled `## ACTIVE WORKSTREAMS` heading simply
+  produced zero workstream rows — indistinguishable from "no workstreams exist yet". The function now
+  tracks whether the heading was seen at all and, if not, emits an invalid record — distinct from the
+  existing "malformed table header" case, which fires only when the heading is present but its column
+  row isn't. See `state_contract.py`, `test_missing_active_workstreams_section_is_flagged_not_dropped`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (17/17) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-4 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 5 — Codex re-review on commit `9ad5919` found two more issues
+
+- **P1 — a workstream table removed out from under a surviving heading was invisible.** The round-4
+  presence check only asked whether `## ACTIVE WORKSTREAMS` was seen at all; if the heading survived
+  but every `|` table line beneath it — header row included — was deleted, `header_checked` stayed
+  `False` with no record emitted for it, same blind spot one level down. Now: heading absent → invalid
+  "section" record (round 4, unchanged); heading present but no table line ever seen → a new invalid
+  "table" record; heading and a header row present but the columns are wrong → existing "malformed
+  header" record (round 2, unchanged). See `state_contract.py`,
+  `test_workstream_section_with_no_table_is_flagged_not_dropped`.
+- **P1 — the round-3/4 shift check false-positived on a deletion strictly after the citation.** Git's
+  zero-context hunk for a pure deletion anchors `new_start` on the new-file line *preceding* the cut
+  (deleting old line 4 produces `@@ -4 +3,0 @@`), so the inclusive `new_start <= num` check treated
+  "deleted right after line 3" the same as "deleted at or before line 3" and failed an unaffected
+  citation. `citation_line_shifted` now computes a boundary that's exclusive for zero-length deletion
+  hunks (`new_start + 1`) and inclusive for hunks that add real content (`new_start`), matching where
+  the cut or insertion actually sits. See `review_zero.py`,
+  `test_deletion_strictly_after_cited_line_does_not_false_positive`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (19/19) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-5 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 6 — Codex re-review on commit `86ea925` found two more issues
+
+- **P1 — a citation the PR itself fixes in the same commit was re-flagged as broken.**
+  `check_impacted_references` re-validated every citation in the current HEAD document against the
+  base-relative shift/deletion checks, with no way to tell "unchanged since base" apart from "just
+  written or corrected by this PR" — so updating a citation from `src/foo.py:3` to `src/foo.py:2` in
+  the same commit that deletes an earlier line still failed as shifted, blocking the exact repair the
+  required CI gate was asking for. The function now takes the PR's added-line set and skips any line
+  the PR itself wrote or edited — those are already validated against current HEAD directly by
+  `check_added_citations`/`check_added_md_links`. See `review_zero.py`,
+  `test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted`.
+- **P1 — a suffixed heading still satisfied the presence checks added in rounds 4 and 5.** Both the
+  `## ACTIVE WORKSTREAMS` and the required-section (`NOW`/`NEXT`) presence checks used `startswith`
+  against the heading text, so a typo that preserves the prefix (`## ACTIVE WORKSTREAMSS`, `## NOWISH`)
+  still satisfied them and let a fresh table pass with the real heading gone. Both now compare the
+  exact heading name parsed by `SECTION_RE` against the required name/key, not a prefix — proactively
+  hardened `section_freshness`'s general `NOW`/`NEXT` matching the same way, since it shared the
+  identical prefix-typo weakness Codex had only flagged on the workstream heading. See
+  `state_contract.py`, `test_suffixed_workstream_heading_does_not_satisfy_presence_check`,
+  `test_suffixed_required_section_heading_does_not_satisfy_presence_check`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (22/22) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-6 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 7 — Codex re-review on commit `afd344b` found three more issues
+
+- **P1 — the round-6 line-skip fix could hide a citation the PR actually broke.** Skipping an entire
+  edited line (round 6) exempted every reference on it, not just the one the edit touched — a line
+  edited for an unrelated reason that still carried an untouched, now-broken citation verbatim would
+  be skipped by the impact scan, and `check_added_citations` also misses it whenever the deleted
+  target's containing directory was removed too (its own directory-exists heuristic goes empty-handed).
+  `check_impacted_references` no longer skips by line; it now compares each individual link
+  target/citation against a base-content set (resolved link targets, `(path, num)` citation pairs)
+  built from that same document at `base`, and only exempts a reference that doesn't appear there
+  verbatim — an untouched reference still matches exactly and gets checked; an edited/new one won't
+  match and is already covered by `check_added_md_links`/`check_added_citations`. This removes the
+  `added` parameter entirely — reference-level comparison needs no line-membership tracking. See
+  `review_zero.py`, `test_unrelated_edit_on_same_line_does_not_hide_a_broken_citation`.
+- **P1 — `not-as-of:` parsed as a valid `as-of:` stamp.** `AS_OF_RE` searched for `as-of:` anywhere in
+  the heading metadata with no boundary, so a malformed marker like `## NOW — not-as-of: 2026-08-24`
+  matched on the substring and was read as fresh. Added a negative lookbehind so a preceding word
+  character or hyphen (as in `not-as-of:`) blocks the match. See `state_contract.py`,
+  `test_not_as_of_marker_is_not_parsed_as_a_valid_stamp`.
+- **P1 — a duplicated required table column silently picked one value.** The header-presence check
+  only asked whether `workstream`/`as-of` were *present* in the normalized column list, so a header
+  like `| Workstream | as-of | as-of |` passed; `dict(zip(columns, cells))` then kept only the last
+  `as-of` cell, hiding a stale value in the first nominal date column behind a fresh second one. The
+  check now requires exactly one of each required column, not merely "at least one" — a duplicate
+  fails the header the same way a missing column already did. See `state_contract.py`,
+  `test_duplicate_required_workstream_column_is_flagged_not_swallowed`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (25/25) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-7 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 8 — Codex re-review on commit `7fa2133` found two more issues (plus one proactive fix)
+
+- **P1 — a renamed doc's base content silently went missing.** `check_impacted_references` read a
+  document's base content via `git show base:doc` using the *current* (HEAD) path — for a renamed
+  doc that path never existed at `base`, so `base_text` came back empty and every one of its
+  references was treated as "not inherited", exempting the whole moved document from the impact
+  scan. Separately, moving a doc to a different directory changes what its *own* relative links
+  resolve against even when their text is completely untouched — a sibling-file link written in the
+  doc's old location resolves against a different base directory once the doc moves, even though
+  nothing about the link itself changed — a case neither the base-comparison check nor
+  `check_added_md_links` was ever built to catch, since a pure rename has no added lines at all.
+  Fixed both: `impact()` now tracks renamed new-paths (`Impact.renamed`),
+  and any link in a renamed doc that doesn't resolve in current HEAD is flagged directly, independent
+  of the hunk-based comparison. See `review_zero.py`,
+  `test_renaming_a_doc_to_a_different_directory_breaks_its_own_relative_link`.
+- **P1 — a document-wide set let a coincidental value match hide a real repair-vs-inherited
+  distinction.** The round-7 fix compared each citation against the *whole document's* base
+  citations as a set, so a citation repaired to a `(path, num)` pair that happened to equal some
+  *other*, unrelated citation's value elsewhere in the same document was misclassified as
+  "inherited" and wrongly checked. Reference provenance is now scoped to the specific diff hunk each
+  HEAD line belongs to — its own hunk's pre-image is the narrowest correct comparison set, since two
+  independent edits in the same file normally land in separate hunks. Added `file_hunk_old_content`
+  to capture each hunk's exact old-side text alongside its new-side line range. See `review_zero.py`,
+  `test_repaired_citation_matching_a_different_deleted_citations_value_is_not_reflagged`.
+- **Proactive — the same new-path-instead-of-old-path bug affected `shrunk`/`restructured`
+  detection for renamed non-doc files.** While fixing the base-content lookup above, the same root
+  cause was found one function up: `impact()`'s `blob_line_count(base, path)` call used the *new*
+  path for every candidate, including renamed ones — a renamed source file could never be detected
+  as shrunk or restructured, since its blob never existed under the new name at `base`. `impact()`
+  now looks up a renamed candidate's line count at its *old* path (`file_hunks`, used for the
+  restructured check, already diffs with `-M` and needed no change). Not something Codex flagged
+  this round, but the identical bug in code already being touched, so it travels with this fix.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (27/27) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-8 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 9 — Codex re-review on commit `6adbcfe` found three more issues
+
+- **P1 — `git diff -M ... -- <new-path>` alone doesn't detect a rename.** The round-8 fix (and the
+  pre-existing `file_hunks`) scoped the diff to only the document's new path, assuming `-M` would
+  still correlate it against its prior content. It doesn't: restricting the pathspec to just the new
+  path never gives git the old path to correlate against, so a pure rename reads as a brand-new file
+  with an empty pre-image — exactly the bug round 8 was meant to fix, just one level deeper. Fixed by
+  moving off git-diff-hunk extraction for document content entirely: a new `doc_reference_pools`
+  fetches base content directly via the document's own base path (through the shared `rename_map`)
+  and diffs it against HEAD with Python's `difflib`, sidestepping pathspec scoping altogether. The
+  remaining git-diff-hunk call sites (`file_hunks`, used for shrink/restructure/shift detection on
+  cited *source* files) got a narrower fix: a new `_diff_pathspecs` helper passes both the old and
+  new path when the target was renamed, which is sufficient there since only hunk *boundaries* are
+  needed, not content. See `review_zero.py`, `test_renamed_doc_with_unchanged_citation_to_a_shrunk_file_is_still_checked`.
+- **P1 — the round-8 renamed-doc check broke the blast-radius contract.** Flagging *every* unresolved
+  link in a renamed document — regardless of whether the rename actually changed anything — surfaced
+  pre-existing broken links whenever a doc was renamed within the same directory (where relative
+  resolution never changes at all). The check now compares each link's resolution from the old
+  document path against its resolution from the new one, and only fails when: the resolution
+  actually changed, the old resolution was valid at `base`, and the new resolution doesn't exist in
+  HEAD — scoping it to links the rename itself broke. See `review_zero.py`,
+  `test_renaming_a_doc_within_the_same_directory_does_not_surface_pre_existing_debt`.
+- **P1 — adjacent edits merged into one diff hunk could still cross-pollinate provenance.** The
+  round-8 hunk-wide pool fix narrowed the comparison scope from the whole document to one hunk, but
+  two independent edits landing in the *same* hunk (no unchanged line between them) still shared one
+  merged pool. `doc_reference_pools` now uses `difflib.SequenceMatcher` opcodes instead of raw git
+  hunks: an `equal` block is trivially, exactly inherited; a `replace` block with matching line counts
+  on both sides is paired *positionally* (new line *k* compared only against old line *k* of that same
+  block), so one edit's old content can no longer be credited to a different, adjacent edit. See
+  `review_zero.py`, `test_adjacent_edits_merged_into_one_diff_block_still_match_per_line`.
+
+  **A genuine limit, not a bug left open:** if a repaired line's *entire new text* is byte-identical
+  to some *other* old line elsewhere in the document, `difflib` legitimately classifies that as an
+  `equal` match to the other line (line-based diffing has no notion of "authorial intent" — identical
+  text is indistinguishable from an unmoved line, by construction) and the reference is treated as
+  fully inherited, i.e. checked. This is the theoretical ceiling of a text-diff-based approach, not an
+  implementation gap: any test built on exact whole-line duplication (rather than a same-length
+  `replace` block, exercised above) hits an ambiguity no diff algorithm can resolve, and — being
+  ambiguous — fail-closed (check it) is the correct default for a governance gate over fail-open.
+
+All three are fixed and regression-tested, including the one honestly-labeled limitation above;
+`python -m unittest discover -s tests -v` (30/30) and `python scripts/review_zero.py --base origin/main`
+are clean (only the pre-existing size WARN).
+
+Codex round-9 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 10 — Codex re-review on commit `a3fb6b5` found two more issues
+
+- **P1 — `AS_OF_RE` was anchored against the wrong kind of prefix.** The round-7 fix added a negative
+  lookbehind blocking a directly-attached prefix like `not-as-of:`, but metadata with an unrelated
+  *word* and a space before the marker — `## NOW — updated as-of: 2026-08-24` — still matched, since
+  the lookbehind only rejects a preceding word character or hyphen, not a preceding word-plus-space.
+  The documented grammar requires the metadata to *begin with* `as-of:`, not merely contain it
+  anywhere. Replaced the substring search with an anchored regex matched via `.match()` instead of
+  `.search()`, which subsumes the round-7 fix entirely (a simpler, correct fix for the same class of
+  bug). See `state_contract.py`, `test_prefixed_as_of_marker_is_not_parsed_as_a_valid_stamp`.
+- **P1 — a citation repaired only for a rename skipped the shift check entirely.** When a cited
+  source file is renamed and loses lines in the same PR, an author who updates just the citation
+  *path* (not the line number) produces citation text that doesn't match base verbatim — so
+  `doc_reference_pools` correctly treats it as "new," which is right for the path but wrong for the
+  number: the number was never touched, and `check_added_citations` only verifies existence and EOF
+  bounds, never a shift. The citation loop now also checks, for a citation that doesn't match locally,
+  whether its path is a rename target and the *old* path paired with the *same* number matched
+  locally — if so, the number is exactly as inherited as an untouched citation's and gets the full
+  shift check via `citation_line_shifted` against the new (renamed) path, which `_diff_pathspecs`
+  (round 9) already resolves correctly. See `review_zero.py`,
+  `test_citation_repaired_only_for_a_rename_still_checks_the_line_number`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (32/32) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-10 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 11 — Codex re-review on commit `d9d1ce6` found one more issue
+
+- **P1 — the round-10 rename-repair exception could false-alarm on a legitimate repair.** When a
+  single line carries *two* citations to the same (renamed) path with different numbers — one
+  dropped in this PR, the other correctly repaired to a *different* number that just happens to
+  equal the dropped one's — `local_citations` pools both old occurrences together, so the round-10
+  check (`old_cited` present with a matching number) fires on the coincidental match even though it
+  came from the wrong occurrence. Unlike round 9's line-identity ambiguity, checking here isn't a
+  safe default: `citation_line_shifted` can't verify a number's correctness, only whether *some*
+  restructuring happened before it, so applying it to an already-correct, intentionally-repaired
+  number is a near-certain false positive, not a defensible fail-closed choice. The exception is now
+  gated on the old path appearing *exactly once* in the local pool, with a matching number — genuinely
+  ambiguous cases (multiple prior occurrences of the renamed path) fall back to being fully exempted,
+  trusting that an author who is clearly already mid-repair recalculated the number, rather than
+  flagging a rename that plausibly just forgot to touch it. See `review_zero.py`,
+  `test_rename_repair_exception_is_not_confused_by_a_second_citation_on_the_line`.
+
+Fixed and regression-tested; `python -m unittest discover -s tests -v` (33/33) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-11 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 12 — Codex re-review on commit `457c786` found three more issues
+
+- **P1 — `citation_line_shifted` flagged on the first unequal hunk instead of the net cumulative
+  offset.** A deletion earlier in the file followed by an insertion also earlier (but later than the
+  deletion) can cancel out — the cited line ends up at exactly the position it would be at with no
+  edits at all — yet the old check returned `True` as soon as it saw *any* single hunk with
+  `old_count != new_count` before the citation, regardless of what came after. Rewrote it to sum every
+  preceding hunk's `(new_count - old_count)` delta and only flag on a nonzero *total*, plus an
+  unconditional flag when the citation's own line sits directly inside a hunk's new range (a genuine
+  edit there, not a position question). See `review_zero.py`,
+  `test_offset_canceling_hunks_do_not_false_positive_on_an_unaffected_citation`.
+- **P1 — the round-11 disambiguation only covered the rename-repair exception, not the general match.**
+  A citation whose *path was never renamed* but whose repaired number happens to equal a different,
+  dropped citation's old number on the same line went through the plain `(cited, num) in local_citations`
+  membership check, which round 11 never touched — so the exact ambiguity round 11 fixed for renames
+  was still open for same-path repairs. Unified the whole citation-matching rule: a citation counts as
+  confidently inherited only when its path — current or pre-rename — appears in the local pool exactly
+  once with a matching number, whether or not a rename is involved. See `review_zero.py`,
+  `test_multiple_citations_to_same_unrenamed_path_on_one_line_exempts_ambiguous_repair`.
+- **P1 — the round-11 "exactly one" check used a set, silently collapsing true duplicates.** Two
+  byte-identical old citations to the same path and number pooled on one line still counted as "one
+  distinct value," so the round-11 exception treated them as confidently unambiguous — but a repair
+  replacing one of two duplicates is exactly as unattributable as replacing one of two differently
+  numbered citations; the fix needs occurrence counts, not distinct values. `doc_reference_pools` now
+  returns citations as a list (preserving duplicates) instead of a set, and the unified match above
+  requires the raw occurrence list — not a deduplicated set — to equal exactly `[num]`. See
+  `review_zero.py`, `test_duplicate_identical_citations_pooled_together_are_not_treated_as_singular`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (36/36) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-12 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 13 — Codex re-review on commit `c24cbb3` found two more issues
+
+- **P1 — the round-12 ambiguity exemption also swallowed the deletion check.** The unified
+  occurrence-matching `continue` gated *every* downstream check on the citation's number being
+  unambiguous — but a fully deleted target breaks every citation to it regardless of which pooled
+  occurrence a given citation traces back to; occurrence precision only matters for the shift check,
+  which depends on an exact number. Split the two: a citation's path being traceable to base at all
+  (any pooled occurrence, regardless of number) is now enough to run the unambiguous
+  `cited in change.deleted` check, while the stricter "exactly one occurrence with a matching number"
+  gate applies only to the shrink/restructure shift check that actually needs that precision. See
+  `review_zero.py`, `test_deleted_target_still_fails_even_with_ambiguous_pooled_citations`.
+- **P1 — the workstream template-placeholder skip matched a prefix, not the exact placeholder.**
+  `name.startswith("<")` silently skipped any row whose name cell begins with `<` — not just the
+  documented `<name>` placeholder but also a malformed real row like `<payments` (a stray leading
+  `<`), hiding its stale date from the freshness guard. Changed to an exact match against the literal
+  placeholder string. See `state_contract.py`,
+  `test_malformed_name_starting_with_angle_bracket_is_not_treated_as_template`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (38/38) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-13 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 14 — Codex re-review on commit `1e8400f` found one more issue
+
+- **P1 — `AS_OF_RE` was anchored at the start but not the end.** The round-10 fix required the
+  metadata to *begin with* `as-of:`, but `\d{4}-\d{2}-\d{2}` doesn't care what follows it — a
+  malformed value like `as-of: 2026-08-24oops` still matched, capturing the date and ignoring the
+  trailing garbage. Added a `\s*$` anchor after the date so the grammar is enforced end-to-end:
+  exactly `as-of: YYYY-MM-DD`, nothing more. See `state_contract.py`,
+  `test_as_of_marker_with_trailing_garbage_is_not_parsed_as_a_valid_stamp`.
+
+Fixed and regression-tested; `python -m unittest discover -s tests -v` (39/39) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-14 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, this handoff.

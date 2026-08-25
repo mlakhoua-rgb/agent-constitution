@@ -4,8 +4,8 @@
 > *where we're going*; everything else is one link away.
 >
 > The session-start read is **`python scripts/session_brief.py`**, not this file — the script
-> derives repo and CI truth live and prints freshness verdicts on this file's sections. Agents
-> then open this file for NOW/NEXT intent and the workstream ledger, and update it with their work.
+> derives repository/GitHub/CI context live and prints freshness verdicts on this file's sections
+> and workstream rows. Agents then open this file for NOW/NEXT intent and the workstream ledger.
 
 ## The three contracts that keep this file honest
 
@@ -21,18 +21,21 @@ chore is a state doc that stops being updated.
 Budget-enforced by `scripts/librarian.py`: **≤ 48 KB total and ≤ 1,200 characters per line.**
 
 > **Why a byte budget and not a line cap.** A line cap is trivially satisfiable by concatenating
-> whole updates onto single enormous lines. That is not hypothetical — it is what happens. The
-> document ends up unreadable in one pass by exactly the agents required to read it first.
-> Budget bytes *and* line length, or the constraint is decorative.
+> whole updates onto single enormous lines. Budget bytes *and* line length, or the constraint is
+> decorative.
 
-**3. Freshness contract.** Every section carries an `as-of: YYYY-MM-DD` stamp. TTLs — NOW/NEXT:
-3 days · workstream rows: 7 days. A daily **Librarian** pass (`scripts/librarian.py --check`)
-validates TTL stamps, links, orphans, and the size budget; drift it flags is closed by an agent
-`--write` PR.
+**3. Freshness contract.** NOW and NEXT carry heading-level `as-of: YYYY-MM-DD` stamps with a
+3-day TTL. **Every populated ACTIVE WORKSTREAMS row carries its own `as-of` value with a 7-day
+TTL.** `scripts/session_brief.py` reports each row independently and `scripts/librarian.py --check`
+hard-fails stale or missing row dates, so one newly refreshed workstream cannot mask another stale
+one.
 
-> **Staleness legend.** `as-of` = the date the row's **substance** was last verified, not the date
-> the line was last edited. Live infrastructure state is only trustworthy from a seat with access
-> to it — treat any live-state claim as as-of its stamp and re-verify before acting on it.
+A daily Librarian pass also validates links, orphans, and the size budget. Drift it flags is closed
+by an agent `--write` PR.
+
+> **Staleness legend.** `as-of` = the date the section or row's **substance** was last verified,
+> not the date the text was edited. Live infrastructure state is only trustworthy from a seat with
+> access to it — re-verify before acting.
 
 *last-librarian-pass: <YYYY-MM-DD>*
 
@@ -75,6 +78,9 @@ same breath as the work it did.
 | Workstream | Owner seat | Status | as-of | Detail |
 |---|---|---|---|---|
 | `<name>` | `<agent / human>` | `<one line>` | `<YYYY-MM-DD>` | `handoffs/<file>.md` |
+
+> The `as-of` cell is required for every real row and is validated independently. Do not add a
+> section-level date here; that would make a fresh heading capable of hiding stale rows.
 
 ## MAP
 

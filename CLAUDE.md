@@ -5,6 +5,11 @@ future ones). Keep it short, tool-neutral, and stable. It contains only routing,
 non-negotiable rules; live state, runbooks, technical detail, evidence, and history belong in the
 linked sources.
 
+> **Filename note.** `CLAUDE.md` is canonical here because some tools auto-discover that filename;
+> the **content and authority are vendor-neutral**. `AGENTS.md` and any other tool-specific entry
+> points are thin pointers, never copies. Rename the canonical file only after verifying every
+> target agent reliably follows the indirection.
+>
 > **Template note.** Everything in `<ANGLE BRACKETS>` is a placeholder. Delete this note when you
 > adopt the file. Resist the urge to grow this document — length is what kills it. If it exceeds
 > roughly 150 lines, something in it belongs in a reference doc instead.
@@ -65,7 +70,9 @@ Never merge on an unresolved review, failed CI, or branch conflict.
   consequential result.
 - Every consequential claim uses the stamp grammar:
   `<claim> · STATUS: CANDIDATE|VALIDATED|REJECTED · evidence: <path>`.
-- Label every claim **VERIFIED / INFERRED / ASSUMED** in the deliverable itself, not in your head.
+- Label **material claims** VERIFIED / INFERRED / ASSUMED in the deliverable itself. Ordinary
+  connective prose does not need audit markup; the labels exist to make decision-relevant
+  uncertainty visible, not to decorate every sentence.
 - If a result is not reproducible, say so and keep the conclusion `STATUS: CANDIDATE`.
 
 Full grammar: `docs/reference/evidence-grammar.md`.

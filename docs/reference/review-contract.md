@@ -9,7 +9,7 @@ added because its absence caused a real problem.
 
 ```
 Round 0        author self-review, BEFORE the first push
-   ├── mechanical:  scripts/review_zero.py           (deterministic, scriptable)
+   ├── mechanical:  tests + scripts/review_zero.py    (deterministic, scriptable)
    └── adversarial: full diff vs. standing invariants (judgment, not scriptable)
         ↓
 Required CI   tests · lint · state-guard · review-zero
@@ -32,17 +32,22 @@ The single highest-leverage change to review throughput is moving findings *earl
 caught in Round 0 costs minutes; the same finding caught in Round 3 costs a full review cycle, a
 context reload for both parties, and a re-request.
 
-**The mechanical half** is `scripts/review_zero.py`. It checks deterministic finding classes only —
-never judgment calls. The check list should be **mined from your own merge history**: look at which
-findings your reviewers actually burn rounds on, and script the ones that are decidable.
+**The mechanical half** is the regression suite plus `scripts/review_zero.py`. The local semantic
+checks are scoped to added lines so old debt cannot block unrelated work. Referential integrity is
+scoped differently: when a PR deletes, renames, or shrinks a target, existing inbound links and
+`path:line` citations to that impacted surface are checked across the repository. A deletion-only
+PR therefore cannot return clean merely because it added no lines.
+
+The check list should be **mined from your own merge history**: look at which findings your reviewers
+actually burn rounds on, and script the ones that are decidable.
 
 **The adversarial half cannot be scripted and is still mandatory.** Read your own full diff as
 someone paid to reject it, against the standing invariants in
 [`.github/agent-review-guidelines.md`](../../.github/agent-review-guidelines.md).
 
-> **Blast-radius rule:** every mechanical check runs on **added lines only**. Pre-existing defects
-> must never block an unrelated PR. Without this rule, adding a check retroactively fails every
-> open PR that happens to sit near old code, and the team disables the check.
+> **Blast-radius rule:** mechanical checks must not surface unrelated pre-existing debt. Added-line
+> checks inspect what the PR introduces; impact checks inspect only references that the PR can
+> invalidate. "Added lines only" is not a valid excuse for missing a broken inbound reference.
 
 ---
 
@@ -60,8 +65,7 @@ a workflow change to adjust is a rubric that stops being adjusted.
 **Required.**
 
 - **An independent reviewer on every PR** — including PRs authored by that reviewer's own vendor.
-  Self-review plus green CI is not sufficient, and treating it as sufficient is the single most
-  common way agentic pipelines regress.
+  Self-review plus green CI is not sufficient.
 - **Post inline comments on the specific changed line** for concrete issues; a top-level comment
   for cross-cutting observations.
 - **Severity-tag every finding:** `[P0]` broken/unsafe, must fix · `[P1]` likely bug/risk ·
@@ -79,10 +83,6 @@ a workflow change to adjust is a rubric that stops being adjusted.
 - **Do not review the code you would have written.** An unfamiliar structure, a new abstraction, or
   an approach you would not have chosen is **not a finding** — say nothing unless you can name the
   input that makes it fail or the invariant it breaks.
-
-  > A reviewer that taxes novelty trains the author out of it. If a design genuinely worries you but
-  > you cannot produce a failing case, that is at most a `[P3]` framed as a question.
-
 - **Scope findings to the diff and its blast radius.** Pre-existing defects the PR merely sits near
   belong in an Issue. Flagging them here converts every PR into an unbounded audit.
 
@@ -94,8 +94,7 @@ Every review ends with exactly one top-level verdict comment. **Including when t
 
 > **Why.** Without it, a clean PR is indistinguishable from a PR that nothing reviewed — the
 > reviewer crashed, the workflow didn't trigger, the token expired. Silence and approval look
-> identical, which forces a second reviewer just to confirm coverage. The stamp is the visible
-> audit trail that the review *ran*.
+> identical, which forces a second reviewer just to confirm coverage.
 >
 > **Never manufacture findings to fill it.** "Clean" is a valid, common, and useful verdict.
 
@@ -106,9 +105,8 @@ First line must be exactly one of:
 **<Reviewer> review — N finding(s)**
 ```
 
-Then one line naming **what you actually traced** — e.g. "checked: deploy path, migration head
-count, enum/string parity, fail directions, test/live divergence." If not clean, list each finding
-as `[P0]–[P3] <one line> → <link to its inline comment>`.
+Then one line naming **what you actually traced**. If not clean, list each finding as
+`[P0]–[P3] <one line> → <link to its inline comment>`.
 
 The stamp is the required audit trail; it is **not** the forbidden praise/summary, and it does not
 replace the inline comments, which still carry the actual findings.
@@ -121,10 +119,13 @@ replace the inline comments, which still carry the actual findings.
 or why it is deferred with a linked Issue. **Never silence.** Pushing a fix without replying is not
 resolution: the reviewer cannot tell a fix from an oversight, and re-raises it next round.
 
-**A well-evidenced author rebuttal closes a thread.** Reviewers are advisory. If the author replies
-with the `file:line` or query that refutes a finding, that finding is resolved — **do not re-raise
-it on the next push.** Without this rule, a confidently wrong reviewer can hold a correct PR
-hostage indefinitely, and authors learn to comply rather than argue.
+**A well-evidenced author rebuttal resolves a finding for iteration accounting.** If the author
+replies with the `file:line`, query, or reproducible artifact that refutes a finding, do not keep
+re-raising the same finding without new evidence.
+
+**That does not satisfy the independent-approval gate.** "Finding resolved" and "reviewer approved
+the latest commit" are separate conditions. The author cannot manufacture the required green light
+by declaring their own rebuttal sufficient.
 
 **Re-request review of the latest commit after each fix push.** An approval on an older commit is
 not an approval of what you are about to merge.
@@ -145,9 +146,7 @@ not an approval of what you are about to merge.
 is not a quality problem — it is a **structural** one. The PR is too large, mixes concerns, or
 rests on a premise nobody has checked. Iterating harder will not fix any of those.
 
-*Response:* stop fixing findings. Decompose the PR, or go settle the premise. This single rule
-prevents the most expensive failure mode in agentic review — a 40-comment thread that converges on
-nothing because both parties are patching symptoms of a bad decomposition.
+*Response:* stop fixing findings. Decompose the PR, or go settle the premise.
 
 ---
 
@@ -160,21 +159,21 @@ Merge only when **all** of these hold:
 3. Every finding is resolved — a fix, or an evidence-backed rejection replied on its thread.
 4. The required reviewer has given a green light **on the latest commit**.
 
-**Never treat as approval:** silence · an older review · CI green alone · your own confidence.
+**Never treat as approval:** silence · an older review · CI green alone · your own confidence · your
+own rebuttal to a review finding.
 
 > **On merge authority for agents.** Whether an agent may merge on its own is a per-project call
 > that belongs in the constitution, not here. If you do grant it, grant it *conditionally* — bound
-> to the four gates above and scoped to specific environments — and write the scope down. An
-> unscoped "the agent can merge" is how a governance framework becomes decorative.
+> to the four gates above and scoped to specific environments — and write the scope down.
 
 ---
 
 ## Docs and markdown PRs get the same rigor
 
-Applied to **claims** rather than code. Flag:
+Applied to **material claims** rather than runtime code. Flag:
 
-- a consequential claim missing the stamp grammar (`STATUS: … · evidence: <path>`)
-- a dead cross-reference or a citation pointing at a line that no longer exists
+- a consequential persisted claim missing the stamp grammar (`STATUS: … · evidence: <path>`)
+- a dead cross-reference or a citation invalidated by a deleted, renamed, or shortened target
 - a contradiction with the constitution or a reference doc
 - a result labeled as validated when its evidence does not support it
 

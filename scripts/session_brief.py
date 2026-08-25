@@ -1,66 +1,39 @@
 #!/usr/bin/env python3
-"""Session Brief — the generated session-start read.
+"""Session Brief — generated truth at the start of an agent session.
 
-Replaces "read docs/STATE.md first" as an agent's opening move.
-
-THE PRINCIPLE: derive live state from its source of truth AT READ TIME; hand-write
-only decisions and intent.
-
-Hand-maintained mirrors of live state rot, silently and measurably — a doc that
-says "currently deployed: v4.2" is wrong the moment it isn't, and an agent will
-cite it with total confidence. So this brief DERIVES what it can (git, CI, doc
-freshness) and POINTS at the small hand-written surfaces that remain
-authoritative for intent (decisions, NOW/NEXT).
-
-Every absence is stated, never silent: a seat without `gh` gets a printed line
-saying so, not a section that quietly disappears. An agent must be able to tell
-"there are no open PRs" from "I couldn't look."
-
-Usage:
-  python scripts/session_brief.py
-  python scripts/session_brief.py --decisions 12
+Derive what can be derived (git, GitHub/CI, freshness) and point at the small
+hand-written surfaces that remain authoritative for intent.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-# --- CONFIGURATION — edit for your repo ------------------------------------
+from state_contract import all_freshness
 
 DEFAULT_BRANCH_CANDIDATES = ("origin/main", "origin/master", "origin/maintenance")
 MIGRATIONS_DIR_MARKER = "alembic/versions"
-
-#: TTL in days per STATE.md section class. Exceeding it prints a STALE verdict.
-TTL_DAYS = {"NOW": 3, "NEXT": 3, "ACTIVE WORKSTREAMS": 7}
-
-# ---------------------------------------------------------------------------
+SECTION_TTLS = {"NOW": 3, "NEXT": 3}
+WORKSTREAM_TTL = 7
 
 REPO = Path(__file__).resolve().parent.parent
 DECISIONS_MD = REPO / "docs/DECISIONS.md"
 STATE_MD = REPO / "docs/STATE.md"
 HANDOFFS_DIR = REPO / "docs/handoffs"
-
 DECISION_LINE_RE = re.compile(r"^- \*\*(\d{4}-\d{2}-\d{2})\*\* — (.+)$")
-# Match the heading FIRST, then look for the date inside its remainder. Do not
-# fold the date into the heading pattern: a heading with a malformed or missing
-# stamp would then fail to match at all and vanish from the report — reading as
-# "no such section" rather than "that section is unstamped". Silent invisibility
-# is the exact failure this whole framework exists to prevent.
-SECTION_RE = re.compile(r"^## ([A-Z][A-Z /]+?)(?:\s*—\s*(.*))?\s*$")
-AS_OF_RE = re.compile(r"as-of:\s*(\d{4}-\d{2}-\d{2})")
 
 
 def git(*args: str) -> str | None:
     try:
         return subprocess.run(
-            ["git", "-C", str(REPO), *args],
-            capture_output=True, text=True, check=True,
+            ["git", "-C", str(REPO), *args], capture_output=True, text=True, check=True
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -86,16 +59,44 @@ def days_since(datestr: str, today: dt.date) -> int:
     return (today - dt.date.fromisoformat(datestr)).days
 
 
-def section_stamps(text: str) -> list[tuple[str, str | None]]:
-    out = []
-    for line in text.splitlines():
-        m = SECTION_RE.match(line.strip())
-        if not m:
-            continue
-        remainder = m.group(2) or ""
-        d = AS_OF_RE.search(remainder)
-        out.append((m.group(1).strip(), d.group(1) if d else None))
-    return out
+def current_pr_ci(branch: str | None) -> tuple[str, list[str]]:
+    """Return a precise current-branch PR/CI summary without turning absence into green."""
+    if not branch or not shutil.which("gh"):
+        return "NOT CHECKED", ["gh CLI unavailable, or branch unknown"]
+    raw = gh("pr", "list", "--state", "open", "--head", branch, "--limit", "1",
+             "--json", "number")
+    if raw is None:
+        return "NOT CHECKED", ["GitHub query failed or authentication is unavailable"]
+    try:
+        rows = json.loads(raw)
+    except json.JSONDecodeError:
+        return "NOT CHECKED", ["GitHub returned unreadable PR data"]
+    if not rows:
+        return "NO OPEN PR", ["CI status is not applicable to an open PR on this branch"]
+    number = str(rows[0]["number"])
+    checks_raw = gh("pr", "view", number, "--json", "statusCheckRollup")
+    if checks_raw is None:
+        return f"PR #{number} · NOT CHECKED", ["status checks query failed"]
+    try:
+        checks = json.loads(checks_raw).get("statusCheckRollup") or []
+    except json.JSONDecodeError:
+        return f"PR #{number} · NOT CHECKED", ["status checks payload unreadable"]
+    if not checks:
+        return f"PR #{number} · NO CHECKS", ["no status checks are reported"]
+    details: list[str] = []
+    bad = False
+    pending = False
+    for item in checks:
+        name = item.get("name") or item.get("context") or item.get("workflowName") or "check"
+        conclusion = item.get("conclusion") or item.get("state") or item.get("status") or "UNKNOWN"
+        details.append(f"{name}: {conclusion}")
+        upper = str(conclusion).upper()
+        if upper in {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}:
+            bad = True
+        elif upper not in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
+            pending = True
+    verdict = "FAIL" if bad else "PENDING" if pending else "GREEN"
+    return f"PR #{number} · {verdict}", details
 
 
 def main() -> int:
@@ -107,22 +108,19 @@ def main() -> int:
     today = dt.datetime.now(dt.timezone.utc).date()
     print(f"SESSION BRIEF — {today.isoformat()} (UTC), generated by scripts/session_brief.py")
 
-    # -- repository truth (always available: this is a checkout) -------------
     rule("REPOSITORY")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     print(f"  branch          {branch or '(unknown)'}")
-
     default_ref = next(
         (r for r in DEFAULT_BRANCH_CANDIDATES
-         if git("rev-parse", "--verify", "--quiet", r) is not None),
-        None,
+         if git("rev-parse", "--verify", "--quiet", r) is not None), None
     )
     if default_ref:
         tip = git("log", "-1", "--format=%h %ad %s", "--date=short", default_ref)
         print(f"  {default_ref:<15} {tip}")
-        ahead_behind = git("rev-list", "--left-right", "--count", f"{default_ref}...HEAD")
-        if ahead_behind:
-            behind, ahead = ahead_behind.split()
+        counts = git("rev-list", "--left-right", "--count", f"{default_ref}...HEAD")
+        if counts:
+            behind, ahead = counts.split()
             print(f"  vs default      {ahead} ahead · {behind} behind")
     else:
         print("  default branch  NOT FOUND — no origin/main|master|maintenance")
@@ -131,97 +129,90 @@ def main() -> int:
     if dirty is None:
         print("  working tree    UNKNOWN (git unavailable)")
     elif dirty:
-        n = len(dirty.splitlines())
-        print(f"  working tree    ⚠ DIRTY — {n} uncommitted path(s)")
+        print(f"  working tree    ⚠ DIRTY — {len(dirty.splitlines())} uncommitted path(s)")
     else:
         print("  working tree    clean")
 
     migrations = sorted(
-        p for p in REPO.glob(f"**/{MIGRATIONS_DIR_MARKER}/*.py")
-        if p.name != "__init__.py"
+        p for p in REPO.glob(f"**/{MIGRATIONS_DIR_MARKER}/*.py") if p.name != "__init__.py"
     )
     if migrations:
-        print(f"  migration head  {migrations[-1].name}  ({len(migrations)} total)")
+        print(f"  migration head  {migrations[-1].name} ({len(migrations)} total)")
 
-    # -- GitHub truth (optional; absence is stated) --------------------------
-    rule("GITHUB")
-    prs = gh("pr", "list", "--state", "open", "--limit", "20",
-             "--json", "number,title,isDraft",
-             "--template",
+    rule("GITHUB / CI")
+    prs = gh("pr", "list", "--state", "open", "--limit", "20", "--json",
+             "number,title,isDraft", "--template",
              '{{range .}}  #{{.number}}{{if .isDraft}} (draft){{end}} {{.title}}\n{{end}}')
     if prs is None:
-        print("  gh CLI unavailable or not authenticated — open PRs NOT CHECKED.")
-        print("  (This is an absence, not an all-clear.)")
+        print("  open PRs        NOT CHECKED — gh unavailable, unauthenticated, or query failed")
     elif not prs.strip():
-        print("  no open PRs")
+        print("  open PRs        none")
     else:
+        print("  open PRs")
         print(prs.rstrip())
+    ci_summary, ci_details = current_pr_ci(branch)
+    print(f"  current branch  {ci_summary}")
+    for detail in ci_details:
+        print(f"                  {detail}")
 
-    # -- decisions (hand-written, authoritative for intent) ------------------
     rule(f"RECENT DECISIONS (newest {args.decisions})")
     if not DECISIONS_MD.exists():
         print(f"  {DECISIONS_MD.relative_to(REPO)} MISSING")
     else:
         shown = 0
         for line in DECISIONS_MD.read_text(encoding="utf-8").splitlines():
-            m = DECISION_LINE_RE.match(line)
-            if not m:
+            match = DECISION_LINE_RE.match(line)
+            if not match:
                 continue
-            date, rest = m.groups()
+            date, rest = match.groups()
             headline = re.sub(r"\*\*(.+?)\*\*", r"\1", rest)
             headline = re.sub(r"\s+", " ", headline).strip()
             if len(headline) > 150:
                 headline = headline[:147] + "..."
-            age = days_since(date, today)
-            print(f"  {date} ({age:>3}d)  {headline}")
+            print(f"  {date} ({days_since(date, today):>3}d)  {headline}")
             shown += 1
             if shown >= args.decisions:
                 break
         if shown == 0:
-            print("  no entries yet — start with your next real decision.")
+            print("  no entries yet — start with your next real decision")
         print(f"\n  full log: {DECISIONS_MD.relative_to(REPO)}")
 
-    # -- state freshness (derived verdict on a hand-written file) ------------
     rule("STATE FRESHNESS")
     if not STATE_MD.exists():
         print(f"  {STATE_MD.relative_to(REPO)} MISSING")
     else:
         text = STATE_MD.read_text(encoding="utf-8")
-        stamps = section_stamps(text)
-        if not stamps:
-            print("  no `## SECTION — as-of: YYYY-MM-DD` headings found.")
-        for name, stamp in stamps:
-            ttl = next((v for k, v in TTL_DAYS.items() if name.startswith(k)), None)
-            if ttl is None:
+        records = all_freshness(text, today, SECTION_TTLS, WORKSTREAM_TTL)
+        if not records:
+            print("  no freshness-controlled sections or workstream rows found")
+        for record in records:
+            label = record.name if record.source == "section" else f"workstream:{record.name}"
+            if record.stamp is None or record.age_days is None:
+                print(f"  {label:<30} ⚠ NO VALID as-of ({record.ttl_days}d TTL)")
                 continue
-            if stamp is None:
-                print(f"  {name:<20} ⚠ NO as-of STAMP (TTL {ttl}d)")
-                continue
-            age = days_since(stamp, today)
-            verdict = "STALE" if age > ttl else "ok"
+            verdict = "STALE" if record.age_days > record.ttl_days else "ok"
             mark = "⚠" if verdict == "STALE" else " "
-            print(f"  {name:<20} {mark} {verdict:<5} as-of {stamp} ({age}d, TTL {ttl}d)")
-
+            print(
+                f"  {label:<30} {mark} {verdict:<5} as-of {record.stamp} "
+                f"({record.age_days}d, TTL {record.ttl_days}d)"
+            )
         size_kb = len(text.encode("utf-8")) / 1024
-        longest = max((len(l) for l in text.splitlines()), default=0)
-        print(f"  size            {size_kb:.1f} KB · longest line {longest} chars")
+        longest = max((len(line) for line in text.splitlines()), default=0)
+        print(f"  size                           {size_kb:.1f} KB · longest line {longest} chars")
 
-    # -- newest handoffs -----------------------------------------------------
     rule("NEWEST HANDOFFS")
     if not HANDOFFS_DIR.exists():
         print(f"  {HANDOFFS_DIR.relative_to(REPO)} MISSING")
     else:
         files = sorted(
-            (p for p in HANDOFFS_DIR.glob("*.md")
-             if p.name not in {"INDEX.md", "TEMPLATE.md"}),
+            (p for p in HANDOFFS_DIR.glob("*.md") if p.name not in {"INDEX.md", "TEMPLATE.md"}),
             reverse=True,
         )[:5]
         if not files:
             print("  none yet")
-        for p in files:
-            print(f"  {p.relative_to(REPO)}")
+        for path in files:
+            print(f"  {path.relative_to(REPO)}")
 
-    # -- what this brief cannot know ----------------------------------------
     rule("NOT COVERED BY THIS BRIEF")
     print("  · Deployed revision and live configuration — verify on the host.")
     print("  · Anything in docs/archive/ — read-only, never current.")

@@ -27,15 +27,21 @@ failure it prevents, and removing it is a contribution, not a loss.
 
 PRs here go through the same machinery the repo ships:
 
-- **review-zero** runs on every PR: broken `path:line` citations, dead relative links, malformed
-  `STATUS:` stamps, and pass-only migrations fail CI. Run `python scripts/review_zero.py` locally
-  before pushing — Python 3.10+, standard library only.
+- **Regression tests** run first (`python -m unittest discover -s tests -v`). Any bug fix to an
+  executable governance claim should arrive with the smallest test that would have caught it.
+- **review-zero** then runs on every PR. Added-line checks catch malformed new stamps, links,
+  citations and migration defects. Impact-aware checks additionally inspect existing inbound
+  references when a PR deletes, renames, or shrinks a target, so deletion-only diffs cannot create
+  silent documentation breakage. Run `python scripts/review_zero.py` locally before pushing.
 - **state-guard** requires every PR to touch `docs/STATE.md` or carry the `state:no-change`
   label. For most PRs here the label is the honest answer; a maintainer applies it in triage, so
   you don't need label permissions — just say in the PR body that project state is unchanged.
 - The PR template's **Round-0 checklist and one-sentence risk statement** are to be filled in,
-  not deleted. For docs PRs too: the risk statement on a docs change names the claim in it most
-  likely to be wrong.
+  not deleted. For docs PRs too: "no runtime verification" never means "claims need no evidence."
+
+The reference scripts support **Python 3.10+** and use the standard library only. GitHub Actions
+currently exercises them on Python 3.11; compatibility changes should keep the documented floor
+or change it explicitly with tests.
 
 ## Style
 

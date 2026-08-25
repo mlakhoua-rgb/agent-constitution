@@ -1,13 +1,18 @@
-# Evidence Grammar — how claims carry their provenance
+# Evidence Grammar — how material claims carry their provenance
 
-Two mechanisms. The **labels** apply to every sentence an agent writes. The **stamp** applies to
-consequential claims that outlive the session.
+Two mechanisms. The **labels** apply to material claims where uncertainty could change a decision.
+The **stamp** applies to consequential claims that outlive the session.
+
+Ordinary connective prose does not need audit markup. The goal is signal, not decoration: if every
+sentence is labeled, the labels stop helping the reader find what actually needs verification.
 
 ---
 
 ## 1. The three labels — VERIFIED / INFERRED / ASSUMED
 
-Every claim in a deliverable goes in one bin, **labeled where the reader will see it.**
+Every **material claim** in a deliverable goes in one bin, labeled where the reader will see it.
+A claim is material when a different truth value could change the requested decision, merge,
+rollout, diagnosis, number, or other consequential action.
 
 | Label | Means | Test |
 |---|---|---|
@@ -15,7 +20,7 @@ Every claim in a deliverable goes in one bin, **labeled where the reader will se
 | **INFERRED** | Follows from verified facts by reasoning you state. | Is the reasoning written down, or only in your head? |
 | **ASSUMED** | You need it true and have not checked. | **Ships with its blast radius attached.** |
 
-**An assumption is not a failure — an unlabeled one is.**
+**An assumption is not a failure — an unlabeled material assumption is.**
 
 ```
 ✗  The fix is deployed.
@@ -28,15 +33,15 @@ Every claim in a deliverable goes in one bin, **labeled where the reader will se
 The second version tells the reader exactly what remains. The first leaves a revoked assumption
 lying around for the next session to cite as fact.
 
-**Calibrate.** Uniform hedging destroys the signal: when every sentence carries a caveat, no caveat
-carries information. Be firm where verified, loud where genuinely uncertain, and delete the silent
-hedges in between.
+**Calibrate.** Uniform labeling and hedging destroy the signal: when every sentence carries a
+marker, no marker carries information. Be firm where verified, loud where genuinely uncertain,
+and reserve labels for claims the reader may act on.
 
 ---
 
 ## 2. The stamp — for claims that outlive the session
 
-Any claim that will be cited later, or acted on by someone who wasn't there, carries:
+Any consequential claim that will be cited later, or acted on by someone who wasn't there, carries:
 
 ```
 <claim> · STATUS: CANDIDATE | VALIDATED | REJECTED · evidence: <path>
@@ -54,13 +59,13 @@ impossible to remove later.
 
 **Rules.**
 
-- **The evidence path is not optional.** A claim with no evidence path is not actionable —
-  including the agent's own.
+- **The evidence path is not optional.** A consequential persisted claim with no evidence path is
+  not actionable — including the agent's own.
 - **Default to `CANDIDATE`.** Promotion to `VALIDATED` is a deliberate act with a reproducible
   artifact behind it, not the natural drift of a claim that nobody challenged.
 - **Keep the grammar greppable.** The literal words `STATUS:` and `evidence:` mean you can audit
-  every claim in the repo with one search — and a linter can enforce that the value is one of the
-  three (`scripts/review_zero.py` does exactly this).
+  every persisted claim in the repo with one search — and a linter can enforce that the value is
+  one of the allowed verdicts (`scripts/review_zero.py` does this mechanically for changed lines).
 
 ---
 

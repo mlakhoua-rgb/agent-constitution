@@ -1,0 +1,462 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "review_zero.py"
+
+
+def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=False)
+
+
+class ReviewZeroImpactTests(unittest.TestCase):
+    def make_repo(self) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="review-zero-test-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        run("git", "init", "-q", cwd=root)
+        run("git", "config", "user.email", "test@example.com", cwd=root)
+        run("git", "config", "user.name", "Test", cwd=root)
+        return root
+
+    def commit(self, root: Path, message: str) -> str:
+        run("git", "add", "-A", cwd=root)
+        result = run("git", "commit", "-q", "-m", message, cwd=root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sha = run("git", "rev-parse", "HEAD", cwd=root)
+        self.assertEqual(sha.returncode, 0, sha.stderr)
+        return sha.stdout.strip()
+
+    def review(self, root: Path, base: str) -> subprocess.CompletedProcess[str]:
+        return run(sys.executable, str(SCRIPT), "--base", base, cwd=root)
+
+    def test_deletion_breaks_existing_markdown_link(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[target](b.md)\n", encoding="utf-8")
+        (root / "docs" / "b.md").write_text("# target\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        (root / "docs" / "b.md").unlink()
+        self.commit(root, "delete target")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("md-link-impact", result.stdout)
+
+    def test_shrunk_source_invalidates_existing_line_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:4.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("1\n2\n3\n4\n5\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        (root / "src" / "foo.py").write_text("1\n2\n", encoding="utf-8")
+        self.commit(root, "shrink target")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_shrunk_source_with_earlier_deletion_shifts_existing_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Deleting the first line shifts every later line up by one: line 3
+        # ("three") is now line 2, and line 3 is what used to be line 4
+        # ("four"). The citation number is still within the new EOF, so the
+        # bounds-only check alone would call this clean.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        self.commit(root, "delete first line")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_unrelated_edit_on_same_line_does_not_hide_a_broken_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("Some prose. See src/foo.py:1.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the only file under src/ (removing the directory from the
+        # HEAD tree entirely) and, in the same commit, edit the doc line for
+        # an unrelated reason while leaving the citation itself untouched.
+        # A line-level skip would hide this: check_added_citations also
+        # misses it because `src` no longer exists as a directory either.
+        (root / "src" / "foo.py").unlink()
+        (root / "docs" / "a.md").write_text("Some fixed prose. See src/foo.py:1.\n", encoding="utf-8")
+        self.commit(root, "delete src/foo.py and unrelated prose edit")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_renaming_a_doc_to_a_different_directory_breaks_its_own_relative_link(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[target](b.md)\n", encoding="utf-8")
+        (root / "docs" / "b.md").write_text("# target\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Move a.md to a different directory with its content — and the
+        # relative link text — completely untouched. b.md itself never
+        # moves, so the link now resolves to a path that never existed.
+        (root / "guides").mkdir()
+        (root / "docs" / "a.md").rename(root / "guides" / "a.md")
+        self.commit(root, "move docs/a.md to guides/a.md")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("md-link-impact", result.stdout)
+
+    def test_repaired_citation_matching_a_different_deleted_citations_value_is_not_reflagged(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2.\n"
+            "\n"
+            "Unrelated paragraph.\n"
+            "\n"
+            "See src/foo.py:3.\n",
+            encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first citation's line entirely, delete the source
+        # file's first line (shifting "three" from line 3 to line 2), and
+        # repair the second citation to point at the shifted "three" —
+        # which happens to equal the *first* (now-deleted) citation's old
+        # value. A document-wide set of base citations would misclassify
+        # this repair as "inherited" from the unrelated first citation and
+        # fail it as shifted; the fix must scope the comparison to the
+        # specific hunk each citation's edit belongs to.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text(
+            "\n"
+            "Unrelated paragraph.\n"
+            "\n"
+            "See src/foo.py:2.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "delete first citation, shift source, repair second citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_deleted_target_still_fails_even_with_ambiguous_pooled_citations(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "Some prose. See src/foo.py:1 and src/foo.py:2 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Edit the prose (unrelated to either citation) while leaving both
+        # citations untouched, and delete src/foo.py entirely. The two
+        # citations pooled on this line make the *shift* check ambiguous
+        # (round 12), but deletion doesn't need occurrence precision — a
+        # citation to a target that's simply gone is broken no matter
+        # which pooled occurrence it traces back to, and exempting it
+        # alongside the shift check would silently clear a real break.
+        (root / "src" / "foo.py").unlink()
+        (root / "docs" / "a.md").write_text(
+            "Some fixed prose. See src/foo.py:1 and src/foo.py:2 for details.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "delete cited file, edit unrelated prose")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_offset_canceling_hunks_do_not_false_positive_on_an_unaffected_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:5.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line (net -1 before line 5) and insert a new
+        # line right after "two" (net +1, also before line 5) — the two
+        # offsets exactly cancel, so "five" is still at line 5 and the
+        # unchanged citation continues to name exactly the same content.
+        # Flagging on the first unequal hunk alone (ignoring that a later
+        # one cancels it out) would false-positive here.
+        (root / "src" / "foo.py").write_text(
+            "two\nINSERTED\nthree\nfour\nfive\n", encoding="utf-8",
+        )
+        self.commit(root, "delete first line, insert a line that cancels the offset")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_multiple_citations_to_same_unrenamed_path_on_one_line_exempts_ambiguous_repair(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and src/foo.py:3 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # No rename this time — delete the source's first line (shifting
+        # "three" from line 3 to line 2), drop the first citation, and
+        # correctly repair the second to point at the shifted "three".
+        # The repaired number coincidentally equals the dropped citation's
+        # old number, both pooled on the same line to the same path — the
+        # same ambiguity round 11 fixed for a *renamed* path must also
+        # apply when no rename is involved at all.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/foo.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "drop first citation, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_duplicate_identical_citations_pooled_together_are_not_treated_as_singular(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and again src/foo.py:2 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the source, delete its first line (shifting "three" from
+        # line 3 to line 2), and repair the surviving citation to point at
+        # the shifted "three". A set of distinct numbers would collapse
+        # the two duplicate old "src/foo.py:2" citations into one value
+        # and treat that as confident, unambiguous provenance for the
+        # repair — but there are genuinely two raw occurrences pooled
+        # together, so the repair's true source is exactly as unknowable
+        # as it would be with two *different* old numbers.
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "rename source, repair citation to shifted content")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_rename_repair_exception_is_not_confused_by_a_second_citation_on_the_line(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and src/foo.py:3 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the cited file, delete its first line (shifting "three"
+        # from line 3 to line 2), drop the first citation entirely, and
+        # correctly repair the second to point at the shifted "three". The
+        # repaired number (2) happens to equal the *dropped* citation's old
+        # number, pooled on the same line — the round-10 rename-repair
+        # exception must not mistake that coincidence for "the number was
+        # never touched" and run the shift check against a legitimate,
+        # already-correct repair.
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "rename source, drop first citation, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_renamed_doc_with_unchanged_citation_to_a_shrunk_file_is_still_checked(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:4.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the doc (pure rename, content untouched — no hunks of its
+        # own) and shrink the cited source file below the cited line, in
+        # the same commit. A git diff scoped to only the doc's new path
+        # can't correlate a pure rename with its prior content at all, so
+        # provenance built that way sees an empty pre-image and treats the
+        # untouched citation as new.
+        (root / "guides").mkdir()
+        (root / "docs" / "a.md").rename(root / "guides" / "a.md")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        self.commit(root, "rename doc and shrink cited source")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_renaming_a_doc_within_the_same_directory_does_not_surface_pre_existing_debt(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[old debt](missing.md)\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Renaming within the same directory doesn't change what any
+        # relative link in the doc resolves against — this pre-existing
+        # broken link is not this PR's blast radius.
+        (root / "docs" / "a.md").rename(root / "docs" / "b.md")
+        self.commit(root, "rename within same directory")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_citation_repaired_only_for_a_rename_still_checks_the_line_number(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the cited file and delete its first line (shifting "three"
+        # from line 3 to line 2). The author correctly updates the citation
+        # path for the rename but leaves the line number untouched — the
+        # citation text changed, so it no longer matches base verbatim and
+        # would otherwise read as "new, already covered by
+        # check_added_citations", which only checks existence/EOF bounds
+        # and would miss that :3 now names "four" instead of "three".
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:3.\n", encoding="utf-8")
+        self.commit(root, "rename cited file, repair citation path only")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_adjacent_edits_merged_into_one_diff_block_still_match_per_line(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "First reference: src/foo.py:2 is relevant.\n"
+            "Second reference: src/foo.py:3 is relevant.\n",
+            encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Both lines are adjacent and both change, with different
+        # surrounding prose on each side (so neither line is byte-identical
+        # across base/head — a whole-line match would trivially, correctly
+        # short-circuit this case and prove nothing). A git-hunk-level diff
+        # merges them into one replace block. The first line's reference is
+        # dropped; the second is repaired to point at the shifted "three"
+        # (now line 2 after deleting foo.py's first line) — its repaired
+        # citation value happens to equal the *first* line's old value. A
+        # block-wide pool (not matched per line) would misclassify this
+        # repair as inherited from the first line and fail it as shifted.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text(
+            "First reference removed, now just prose.\n"
+            "Second reference repaired: src/foo.py:2 is relevant now.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "adjacent edits: drop first reference, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line (shifting "three" from line 3 to line 2)
+        # and, in the same commit, update the citation to point at the new
+        # correct line. The impact scan must not re-flag a citation the PR
+        # itself just repaired — it's already validated against current
+        # HEAD by the added-citation check.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/foo.py:2.\n", encoding="utf-8")
+        self.commit(root, "delete first line and fix the citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_deletion_strictly_after_cited_line_does_not_false_positive(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Deleting the line *after* the cited line ("four") does not move
+        # what line 3 ("three") names. Git's zero-context hunk for a pure
+        # deletion anchors `new_start` on the line *preceding* the cut
+        # (`@@ -4,1 +3,0 @@`), which an inclusive `new_start <= num` check
+        # would misread as "at or before line 3" and false-positive on.
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfive\n", encoding="utf-8")
+        self.commit(root, "delete the line after the citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_restructured_non_shrinking_file_shifts_existing_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line and add a new line at the end: net line
+        # count is unchanged (the file never enters `shrunk`), but line 3
+        # now names what used to be line 4 ("four") instead of "three".
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\nsix\n", encoding="utf-8")
+        self.commit(root, "delete first line, add a line at the end")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_deleting_last_file_in_directory_breaks_existing_directory_link(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "guide").mkdir()
+        (root / "docs" / "a.md").write_text("[guide](guide/)\n", encoding="utf-8")
+        (root / "docs" / "guide" / "only.md").write_text("# only\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        (root / "docs" / "guide" / "only.md").unlink()
+        self.commit(root, "delete last file in guide/")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("md-link-impact", result.stdout)
+
+    def test_unrelated_deletion_does_not_surface_old_unrelated_debt(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[already broken](missing.md)\n", encoding="utf-8")
+        (root / "unrelated.txt").write_text("x\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        (root / "unrelated.txt").unlink()
+        self.commit(root, "delete unrelated")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_new_migration_without_downgrade_fails(self) -> None:
+        root = self.make_repo()
+        (root / "README.md").write_text("base\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        migrations = root / "alembic" / "versions"
+        migrations.mkdir(parents=True)
+        (migrations / "001_new.py").write_text("def upgrade():\n    pass\n", encoding="utf-8")
+        self.commit(root, "add migration")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("downgrade()", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
