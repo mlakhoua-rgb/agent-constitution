@@ -166,6 +166,39 @@ No ACTIVE WORKSTREAMS heading anywhere in this document.
         self.assertIsNone(workstream_records[0].stamp)
         self.assertIsNone(workstream_records[0].age_days)
 
+    def test_suffixed_workstream_heading_does_not_satisfy_presence_check(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMSS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| `payments` | agent | active | `2020-01-01` | x |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        # A typo that preserves the prefix (`ACTIVE WORKSTREAMSS`) must not
+        # masquerade as the real heading via a startswith check — the
+        # presence guard should still fire, and the table underneath the
+        # fake heading stays invisible to it.
+        workstream_records = [r for r in records if r.source == "workstream"]
+        self.assertEqual(len(workstream_records), 1)
+        self.assertEqual(workstream_records[0].name, "ACTIVE WORKSTREAMS section")
+        self.assertIsNone(workstream_records[0].stamp)
+
+    def test_suffixed_required_section_heading_does_not_satisfy_presence_check(self) -> None:
+        text = """\
+## NOWISH — as-of: 2026-08-24
+
+## NEXT — as-of: 2026-08-24
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {"NOW": 3, "NEXT": 3}, 7)
+        # A typo that keeps the `NOW` prefix (`NOWISH`) must not satisfy
+        # the required-section presence check either.
+        by_name = {r.name: r for r in records}
+        self.assertIn("NOW", by_name)
+        self.assertIsNone(by_name["NOW"].stamp)
+        self.assertIsNone(by_name["NOW"].age_days)
+        self.assertEqual(by_name["NEXT"].age_days, 1)
+
     def test_active_workstreams_heading_does_not_need_fake_section_stamp(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS

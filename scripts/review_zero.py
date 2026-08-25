@@ -248,16 +248,29 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
     return found
 
 
-def check_impacted_references(base: str, change: Impact) -> list[Finding]:
+def check_impacted_references(
+    base: str, change: Impact, added: dict[str, list[tuple[int, str]]]
+) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
     if not change.deleted and not change.shrunk and not change.deleted_dirs and not change.restructured:
         return []
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
+    added_linenos = {doc: {ln for ln, _ in rows} for doc, rows in added.items()}
     for doc in sorted(p for p in current_paths if p.endswith(".md")):
         doc_dir = posixpath.dirname(doc)
+        doc_added = added_linenos.get(doc, set())
         for lineno, text in enumerate(markdown_lines("HEAD", doc), 1):
             if IGNORE_TOKEN in text:
+                continue
+            if lineno in doc_added:
+                # This line's links/citations were written or edited by this
+                # PR — check_added_md_links/check_added_citations already
+                # validate them against current HEAD directly. Re-running the
+                # base-relative shift/deletion check here would fail an
+                # already-correct citation the PR just repaired (e.g.
+                # updating `src/foo.py:3` to `src/foo.py:2` after an earlier
+                # deletion in the same commit).
                 continue
             for target in MD_LINK_RE.findall(text):
                 if re.match(r"^(https?:|mailto:|#|<)", target):
@@ -407,7 +420,7 @@ def main() -> int:
     findings: list[Finding] = []
     findings += check_added_citations(added)
     findings += check_added_md_links(added)
-    findings += check_impacted_references(base, change)
+    findings += check_impacted_references(base, change, added)
     findings += check_status_grammar(added)
     findings += check_migrations(base, added)
     findings += check_param_defaults(added)

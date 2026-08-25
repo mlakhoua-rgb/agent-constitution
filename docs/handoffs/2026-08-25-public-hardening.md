@@ -169,3 +169,29 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-5 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 6 — Codex re-review on commit `86ea925` found two more issues
+
+- **P1 — a citation the PR itself fixes in the same commit was re-flagged as broken.**
+  `check_impacted_references` re-validated every citation in the current HEAD document against the
+  base-relative shift/deletion checks, with no way to tell "unchanged since base" apart from "just
+  written or corrected by this PR" — so updating a citation from `src/foo.py:3` to `src/foo.py:2` in
+  the same commit that deletes an earlier line still failed as shifted, blocking the exact repair the
+  required CI gate was asking for. The function now takes the PR's added-line set and skips any line
+  the PR itself wrote or edited — those are already validated against current HEAD directly by
+  `check_added_citations`/`check_added_md_links`. See `review_zero.py`,
+  `test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted`.
+- **P1 — a suffixed heading still satisfied the presence checks added in rounds 4 and 5.** Both the
+  `## ACTIVE WORKSTREAMS` and the required-section (`NOW`/`NEXT`) presence checks used `startswith`
+  against the heading text, so a typo that preserves the prefix (`## ACTIVE WORKSTREAMSS`, `## NOWISH`)
+  still satisfied them and let a fresh table pass with the real heading gone. Both now compare the
+  exact heading name parsed by `SECTION_RE` against the required name/key, not a prefix — proactively
+  hardened `section_freshness`'s general `NOW`/`NEXT` matching the same way, since it shared the
+  identical prefix-typo weakness Codex had only flagged on the workstream heading. See
+  `state_contract.py`, `test_suffixed_workstream_heading_does_not_satisfy_presence_check`,
+  `test_suffixed_required_section_heading_does_not_satisfy_presence_check`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (22/22) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-6 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

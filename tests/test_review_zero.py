@@ -80,6 +80,25 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line (shifting "three" from line 3 to line 2)
+        # and, in the same commit, update the citation to point at the new
+        # correct line. The impact scan must not re-flag a citation the PR
+        # itself just repaired — it's already validated against current
+        # HEAD by the added-citation check.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/foo.py:2.\n", encoding="utf-8")
+        self.commit(root, "delete first line and fix the citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_deletion_strictly_after_cited_line_does_not_false_positive(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

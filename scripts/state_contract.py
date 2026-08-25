@@ -50,10 +50,12 @@ def section_freshness(
         if not match:
             continue
         name = match.group(1).strip()
-        key = next((k for k in ttl_days if name.startswith(k)), None)
+        # Exact match, not a prefix: `startswith` would let a typo like
+        # `## NOWISH` masquerade as the real `NOW` heading.
+        key = name if name in ttl_days else None
         if key is None:
             continue
-        if name.startswith("ACTIVE WORKSTREAMS"):
+        if name == "ACTIVE WORKSTREAMS":
             # ACTIVE WORKSTREAMS carries no section-level stamp of its own —
             # freshness comes from workstream_freshness's per-row records —
             # but the heading being present still counts as "not missing".
@@ -91,7 +93,12 @@ def workstream_freshness(
     for raw in lines:
         stripped = raw.strip()
         if stripped.startswith("## "):
-            if stripped.startswith("## ACTIVE WORKSTREAMS"):
+            heading_match = SECTION_RE.match(stripped)
+            heading_name = heading_match.group(1).strip() if heading_match else stripped[3:].strip()
+            if heading_name == "ACTIVE WORKSTREAMS":
+                # Exact match, not a prefix: `startswith` previously let a
+                # typo like `## ACTIVE WORKSTREAMSS` masquerade as the real
+                # heading and pass the presence check below.
                 in_section = True
                 section_seen = True
                 header_checked = False
