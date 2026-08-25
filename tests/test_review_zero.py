@@ -152,6 +152,74 @@ class ReviewZeroImpactTests(unittest.TestCase):
         result = self.review(root, base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_renamed_doc_with_unchanged_citation_to_a_shrunk_file_is_still_checked(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:4.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the doc (pure rename, content untouched — no hunks of its
+        # own) and shrink the cited source file below the cited line, in
+        # the same commit. A git diff scoped to only the doc's new path
+        # can't correlate a pure rename with its prior content at all, so
+        # provenance built that way sees an empty pre-image and treats the
+        # untouched citation as new.
+        (root / "guides").mkdir()
+        (root / "docs" / "a.md").rename(root / "guides" / "a.md")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        self.commit(root, "rename doc and shrink cited source")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
+    def test_renaming_a_doc_within_the_same_directory_does_not_surface_pre_existing_debt(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[old debt](missing.md)\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Renaming within the same directory doesn't change what any
+        # relative link in the doc resolves against — this pre-existing
+        # broken link is not this PR's blast radius.
+        (root / "docs" / "a.md").rename(root / "docs" / "b.md")
+        self.commit(root, "rename within same directory")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_adjacent_edits_merged_into_one_diff_block_still_match_per_line(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "First reference: src/foo.py:2 is relevant.\n"
+            "Second reference: src/foo.py:3 is relevant.\n",
+            encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Both lines are adjacent and both change, with different
+        # surrounding prose on each side (so neither line is byte-identical
+        # across base/head — a whole-line match would trivially, correctly
+        # short-circuit this case and prove nothing). A git-hunk-level diff
+        # merges them into one replace block. The first line's reference is
+        # dropped; the second is repaired to point at the shifted "three"
+        # (now line 2 after deleting foo.py's first line) — its repaired
+        # citation value happens to equal the *first* line's old value. A
+        # block-wide pool (not matched per line) would misclassify this
+        # repair as inherited from the first line and fail it as shifted.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text(
+            "First reference removed, now just prose.\n"
+            "Second reference repaired: src/foo.py:2 is relevant now.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "adjacent edits: drop first reference, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

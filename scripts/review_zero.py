@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import difflib
 import posixpath
 import re
 import subprocess
@@ -98,12 +99,35 @@ def blob_line_count(ref: str, path: str) -> int | None:
 
 
 @lru_cache(maxsize=None)
+def rename_map(base: str) -> dict[str, str]:
+    """new_path -> old_path for every rename detected between base and HEAD."""
+    raw = git("diff", "--name-status", "-M", f"{base}...HEAD")
+    out: dict[str, str] = {}
+    for line in raw.splitlines():
+        fields = line.split("\t")
+        if fields[0].startswith("R") and len(fields) >= 3:
+            out[fields[2]] = fields[1]
+    return out
+
+
+def _diff_pathspecs(base: str, path: str) -> tuple[str, ...]:
+    """Pathspec args for a per-file diff that stays correct across a
+    rename. Git's rename detection needs BOTH the old and new path inside
+    the diff's own file set — scoping the diff to only the new path makes
+    a pure rename read as a brand-new file with an empty pre-image, since
+    git never gets the chance to correlate it against its history."""
+    old_path = rename_map(base).get(path)
+    return (old_path, path) if old_path and old_path != path else (path,)
+
+
+@lru_cache(maxsize=None)
 def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
     """(old_start, old_count, new_start, new_count) for each diff hunk on path."""
     try:
-        # -M so a renamed path's hunks still diff against its true prior
-        # content instead of reading as a full add with no history.
-        diff = git("diff", "-M", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
+        diff = git(
+            "diff", "-M", "--unified=0", "--no-color", f"{base}...HEAD",
+            "--", *_diff_pathspecs(base, path),
+        )
     except subprocess.CalledProcessError:
         return ()
     hunks: list[tuple[int, int, int, int]] = []
@@ -120,37 +144,64 @@ def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
 
 
 @lru_cache(maxsize=None)
-def file_hunk_old_content(base: str, path: str) -> tuple[tuple[int, int, str], ...]:
-    """(new_start, new_count, old_text) for each diff hunk on path — the
-    hunk's new-side line range in HEAD, paired with the exact old-side line
-    content (pre-image) it replaced. `-M` so a rename still diffs against
-    the file's true prior content rather than showing as a fresh add with
-    an empty pre-image."""
-    try:
-        diff = git("diff", "-M", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
-    except subprocess.CalledProcessError:
-        return ()
-    hunks: list[tuple[int, int, str]] = []
-    new_start = new_count = 0
-    old_lines: list[str] = []
-    in_hunk = False
-    for raw in diff.splitlines():
-        match = FULL_HUNK_RE.match(raw)
-        if match:
-            if in_hunk:
-                hunks.append((new_start, new_count, "\n".join(old_lines)))
-            new_start = int(match.group(3))
-            new_count = int(match.group(4)) if match.group(4) is not None else 1
-            old_lines = []
-            in_hunk = True
-            continue
-        if not in_hunk:
-            continue
-        if raw.startswith("-") and not raw.startswith("---"):
-            old_lines.append(raw[1:])
-    if in_hunk:
-        hunks.append((new_start, new_count, "\n".join(old_lines)))
-    return tuple(hunks)
+def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, frozenset] | None]:
+    """For each HEAD line number (1-indexed) in `doc`: either None,
+    meaning the line is byte-identical to its base counterpart — trust
+    every reference on it outright — or (targets, citations): the link
+    targets and (path, num) citation pairs a reference on that exact
+    line may draw "inherited from base" status from.
+
+    Base content is fetched directly via the document's own base path,
+    resolved through the rename map when the doc itself was renamed —
+    not a git-diff pathspec scoped to only the new path, which can't
+    correlate a pure rename with its prior content at all (see
+    `_diff_pathspecs`; the same limitation applies to a whole-document
+    diff, not just per-path hunk extraction).
+
+    Uses a line-level diff (not git hunks) so two independent edits that
+    land on adjacent lines never get merged into one comparison pool —
+    each `replace` block with matching line counts on both sides is
+    paired positionally, so one edit's old content can't be mistaken for
+    another's provenance.
+
+    Cached via `lru_cache` — the returned dict is shared across callers;
+    treat it as read-only."""
+    old_doc = rename_map(base).get(doc, doc)
+    base_lines = markdown_lines(base, old_doc)
+    head_lines = markdown_lines("HEAD", doc)
+    doc_dir = posixpath.dirname(doc)
+
+    def targets_of(text: str) -> frozenset[str]:
+        return frozenset(
+            posixpath.normpath(posixpath.join(doc_dir, clean))
+            for target in MD_LINK_RE.findall(text)
+            if not re.match(r"^(https?:|mailto:|#|<)", target)
+            for clean in [target.split("#", 1)[0].strip()]
+            if clean
+        )
+
+    pools: dict[int, tuple[frozenset, frozenset] | None] = {}
+    matcher = difflib.SequenceMatcher(None, base_lines, head_lines, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for j in range(j1, j2):
+                pools[j + 1] = None
+        elif tag == "replace" and (i2 - i1) == (j2 - j1):
+            for k in range(i2 - i1):
+                old_line = base_lines[i1 + k]
+                pools[j1 + k + 1] = (targets_of(old_line), frozenset(CITATION_RE.findall(old_line)))
+        elif j2 > j1:
+            # insert, delete-with-no-new-side, or a replace with an uneven
+            # line count on each side: no reliable per-line correspondence
+            # within the block. Fall back to the block's combined pre-image
+            # as a single (broader, still base-scoped) pool for every new
+            # line in it — a documented, rare residual imprecision rather
+            # than silently trusting nothing or everything.
+            combined = "\n".join(base_lines[i1:i2])
+            pool = (targets_of(combined), frozenset(CITATION_RE.findall(combined)))
+            for j in range(j1, j2):
+                pools[j + 1] = pool
+    return pools
 
 
 def citation_line_shifted(base: str, path: str, num: int) -> bool:
@@ -200,7 +251,6 @@ def impact(base: str) -> Impact:
     deleted: set[str] = set()
     candidates: set[str] = set()
     renamed: set[str] = set()
-    renamed_from: dict[str, str] = {}
     raw = git("diff", "--name-status", "-M", f"{base}...HEAD")
     for line in raw.splitlines():
         fields = line.split("\t")
@@ -209,7 +259,6 @@ def impact(base: str) -> Impact:
             deleted.add(fields[1])
             candidates.add(fields[2])
             renamed.add(fields[2])
-            renamed_from[fields[2]] = fields[1]
         elif status == "D" and len(fields) >= 2:
             deleted.add(fields[1])
         elif status in {"M", "A"} and len(fields) >= 2:
@@ -221,7 +270,7 @@ def impact(base: str) -> Impact:
         # A renamed file's blob lookup needs its *old* path — `git show`
         # does no rename resolution of its own, so looking up the new path
         # at `base` always misses (it never existed under that name there).
-        old_path = renamed_from.get(path, path)
+        old_path = rename_map(base).get(path, path)
         if old_path not in tree_paths(base) or path not in tree_paths("HEAD"):
             continue
         before = blob_line_count(base, old_path)
@@ -304,41 +353,30 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
     dirs = tree_dirs("HEAD")
+    base_paths = tree_paths(base)
+    base_dirs = tree_dirs(base)
     for doc in sorted(p for p in current_paths if p.endswith(".md")):
         doc_dir = posixpath.dirname(doc)
-        # Scope "is this reference inherited from base?" to the hunk the
-        # HEAD line sits in, not the whole document. A document-wide set
-        # of base references is too coarse: an identical (path, num) pair
-        # existing anywhere else in the file — e.g. a citation this PR
-        # correctly repaired to a value some *other*, unrelated line already
-        # cited — would misclassify the fresh repair as "inherited" and
-        # apply the impact check to it. A hunk sits well within a genuine
-        # copy of two independent edits, e.g. deleting one citation's line
-        # and separately repairing another, so its own pre-image is the
-        # right — and narrowest — comparison scope.
-        hunks = file_hunk_old_content(base, doc)
+        old_doc = rename_map(base).get(doc)
+        old_doc_dir = posixpath.dirname(old_doc) if old_doc else doc_dir
+        # Scope "is this reference inherited from base?" to the exact HEAD
+        # line, not the whole document or even a whole diff hunk — two
+        # independent edits (e.g. deleting one citation's line and
+        # separately repairing another) can land in the same hunk, and a
+        # hunk-wide pool would let one edit's old content be mistaken for
+        # another's provenance. `doc_reference_pools` builds this at the
+        # line level via a real diff, so it also transparently handles a
+        # renamed doc's true prior content (a pathspec-scoped git diff
+        # cannot: see `_diff_pathspecs`).
+        pools = doc_reference_pools(base, doc)
         for lineno, text in enumerate(markdown_lines("HEAD", doc), 1):
             if IGNORE_TOKEN in text:
                 continue
-            local_old_text = next(
-                (old_text for new_start, new_count, old_text in hunks
-                 if new_count > 0 and new_start <= lineno < new_start + new_count),
-                None,
-            )
-            # None means this HEAD line isn't covered by any hunk's added
-            # range — it's byte-identical to its base counterpart, so every
-            # reference on it is trivially inherited; skip building a local
-            # comparison set and just check them all.
-            local_targets = local_citations = None
-            if local_old_text is not None:
-                local_targets = {
-                    posixpath.normpath(posixpath.join(doc_dir, clean))
-                    for target in MD_LINK_RE.findall(local_old_text)
-                    if not re.match(r"^(https?:|mailto:|#|<)", target)
-                    for clean in [target.split("#", 1)[0].strip()]
-                    if clean
-                }
-                local_citations = set(CITATION_RE.findall(local_old_text))
+            entry = pools.get(lineno)
+            # None (including a missing key, which shouldn't happen but is
+            # treated the same way) means every reference on this line is
+            # trivially inherited; skip building a local comparison set.
+            local_targets, local_citations = entry if entry else (None, None)
             for target in MD_LINK_RE.findall(text):
                 if re.match(r"^(https?:|mailto:|#|<)", target):
                     continue
@@ -346,19 +384,27 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                 if not clean:
                     continue
                 resolved = posixpath.normpath(posixpath.join(doc_dir, clean))
-                if doc in change.renamed and resolved not in current_paths and resolved not in dirs:
-                    # Moving this document changes what its own relative
-                    # links resolve against, even when the link text itself
-                    # is untouched — `check_added_md_links` never sees this
-                    # line (a pure rename has no added lines), and the
-                    # hunk/base comparison below only catches targets that
-                    # were themselves deleted, not links broken purely by
-                    # their own document's move.
-                    found.append(Finding(
-                        "FAIL", "md-link-impact", doc, lineno,
-                        f"link `{target}` resolves to missing `{resolved}` — this document's own "
-                        "rename changed what its relative links resolve against",
-                    ))
+                if doc in change.renamed and old_doc:
+                    old_resolved = posixpath.normpath(posixpath.join(old_doc_dir, clean))
+                    was_valid = old_resolved in base_paths or old_resolved in base_dirs
+                    still_valid = resolved in current_paths or resolved in dirs
+                    if old_resolved != resolved and was_valid and not still_valid:
+                        # Moving this document changes what its own relative
+                        # links resolve against, even when the link text
+                        # itself is untouched — `check_added_md_links` never
+                        # sees this line (a pure rename has no added lines),
+                        # and the base-comparison below only catches targets
+                        # that were themselves deleted, not links broken
+                        # purely by their own document's move. Scoped to
+                        # links the rename actually broke (resolution
+                        # changed, was valid before) so pre-existing debt
+                        # elsewhere in a merely-renamed doc stays out of
+                        # this PR's blast radius.
+                        found.append(Finding(
+                            "FAIL", "md-link-impact", doc, lineno,
+                            f"link `{target}` resolves to missing `{resolved}` — this document's own "
+                            "rename changed what its relative links resolve against",
+                        ))
                 if local_targets is not None and resolved not in local_targets:
                     # This exact link target isn't inherited from base — it's
                     # new or edited content already validated against current
@@ -372,9 +418,9 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
             for cited, num in CITATION_RE.findall(text):
                 if local_citations is not None and (cited, num) not in local_citations:
                     # Same reasoning as links: an untouched citation carries
-                    # the exact same (path, line-number) pair over from the
-                    # same hunk's pre-image. A changed one — including a
-                    # repair the PR made to a citation shifted by its own
+                    # the exact same (path, line-number) pair over from this
+                    # exact line's base provenance. A changed one — including
+                    # a repair the PR made to a citation shifted by its own
                     # earlier edit — won't match and is already covered by
                     # check_added_citations.
                     continue

@@ -265,3 +265,49 @@ All three are fixed and regression-tested; `python -m unittest discover -s tests
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-8 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 9 — Codex re-review on commit `6adbcfe` found three more issues
+
+- **P1 — `git diff -M ... -- <new-path>` alone doesn't detect a rename.** The round-8 fix (and the
+  pre-existing `file_hunks`) scoped the diff to only the document's new path, assuming `-M` would
+  still correlate it against its prior content. It doesn't: restricting the pathspec to just the new
+  path never gives git the old path to correlate against, so a pure rename reads as a brand-new file
+  with an empty pre-image — exactly the bug round 8 was meant to fix, just one level deeper. Fixed by
+  moving off git-diff-hunk extraction for document content entirely: a new `doc_reference_pools`
+  fetches base content directly via the document's own base path (through the shared `rename_map`)
+  and diffs it against HEAD with Python's `difflib`, sidestepping pathspec scoping altogether. The
+  remaining git-diff-hunk call sites (`file_hunks`, used for shrink/restructure/shift detection on
+  cited *source* files) got a narrower fix: a new `_diff_pathspecs` helper passes both the old and
+  new path when the target was renamed, which is sufficient there since only hunk *boundaries* are
+  needed, not content. See `review_zero.py`, `test_renamed_doc_with_unchanged_citation_to_a_shrunk_file_is_still_checked`.
+- **P1 — the round-8 renamed-doc check broke the blast-radius contract.** Flagging *every* unresolved
+  link in a renamed document — regardless of whether the rename actually changed anything — surfaced
+  pre-existing broken links whenever a doc was renamed within the same directory (where relative
+  resolution never changes at all). The check now compares each link's resolution from the old
+  document path against its resolution from the new one, and only fails when: the resolution
+  actually changed, the old resolution was valid at `base`, and the new resolution doesn't exist in
+  HEAD — scoping it to links the rename itself broke. See `review_zero.py`,
+  `test_renaming_a_doc_within_the_same_directory_does_not_surface_pre_existing_debt`.
+- **P1 — adjacent edits merged into one diff hunk could still cross-pollinate provenance.** The
+  round-8 hunk-wide pool fix narrowed the comparison scope from the whole document to one hunk, but
+  two independent edits landing in the *same* hunk (no unchanged line between them) still shared one
+  merged pool. `doc_reference_pools` now uses `difflib.SequenceMatcher` opcodes instead of raw git
+  hunks: an `equal` block is trivially, exactly inherited; a `replace` block with matching line counts
+  on both sides is paired *positionally* (new line *k* compared only against old line *k* of that same
+  block), so one edit's old content can no longer be credited to a different, adjacent edit. See
+  `review_zero.py`, `test_adjacent_edits_merged_into_one_diff_block_still_match_per_line`.
+
+  **A genuine limit, not a bug left open:** if a repaired line's *entire new text* is byte-identical
+  to some *other* old line elsewhere in the document, `difflib` legitimately classifies that as an
+  `equal` match to the other line (line-based diffing has no notion of "authorial intent" — identical
+  text is indistinguishable from an unmoved line, by construction) and the reference is treated as
+  fully inherited, i.e. checked. This is the theoretical ceiling of a text-diff-based approach, not an
+  implementation gap: any test built on exact whole-line duplication (rather than a same-length
+  `replace` block, exercised above) hits an ambiguity no diff algorithm can resolve, and — being
+  ambiguous — fail-closed (check it) is the correct default for a governance gate over fail-open.
+
+All three are fixed and regression-tested, including the one honestly-labeled limitation above;
+`python -m unittest discover -s tests -v` (30/30) and `python scripts/review_zero.py --base origin/main`
+are clean (only the pre-existing size WARN).
+
+Codex round-9 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
