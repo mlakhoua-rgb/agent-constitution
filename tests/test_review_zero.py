@@ -100,6 +100,58 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_renaming_a_doc_to_a_different_directory_breaks_its_own_relative_link(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "a.md").write_text("[target](b.md)\n", encoding="utf-8")
+        (root / "docs" / "b.md").write_text("# target\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Move a.md to a different directory with its content — and the
+        # relative link text — completely untouched. b.md itself never
+        # moves, so the link now resolves to a path that never existed.
+        (root / "guides").mkdir()
+        (root / "docs" / "a.md").rename(root / "guides" / "a.md")
+        self.commit(root, "move docs/a.md to guides/a.md")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("md-link-impact", result.stdout)
+
+    def test_repaired_citation_matching_a_different_deleted_citations_value_is_not_reflagged(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2.\n"
+            "\n"
+            "Unrelated paragraph.\n"
+            "\n"
+            "See src/foo.py:3.\n",
+            encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first citation's line entirely, delete the source
+        # file's first line (shifting "three" from line 3 to line 2), and
+        # repair the second citation to point at the shifted "three" —
+        # which happens to equal the *first* (now-deleted) citation's old
+        # value. A document-wide set of base citations would misclassify
+        # this repair as "inherited" from the unrelated first citation and
+        # fail it as shifted; the fix must scope the comparison to the
+        # specific hunk each citation's edit belongs to.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text(
+            "\n"
+            "Unrelated paragraph.\n"
+            "\n"
+            "See src/foo.py:2.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "delete first citation, shift source, repair second citation")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_citation_fixed_in_same_pr_is_not_reflagged_as_shifted(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

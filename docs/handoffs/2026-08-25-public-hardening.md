@@ -227,3 +227,41 @@ All three are fixed and regression-tested; `python -m unittest discover -s tests
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-7 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 8 — Codex re-review on commit `7fa2133` found two more issues (plus one proactive fix)
+
+- **P1 — a renamed doc's base content silently went missing.** `check_impacted_references` read a
+  document's base content via `git show base:doc` using the *current* (HEAD) path — for a renamed
+  doc that path never existed at `base`, so `base_text` came back empty and every one of its
+  references was treated as "not inherited", exempting the whole moved document from the impact
+  scan. Separately, moving a doc to a different directory changes what its *own* relative links
+  resolve against even when their text is completely untouched (a relative link to `b.md` written in
+  `docs/a.md` resolves to `docs/b.md`; the same untouched link text in `guides/a.md` resolves to
+  `guides/b.md` instead) — a case neither the base-comparison check nor `check_added_md_links` was
+  ever built to catch, since a pure rename has no added lines at all. Fixed both: `impact()` now
+  tracks renamed new-paths (`Impact.renamed`),
+  and any link in a renamed doc that doesn't resolve in current HEAD is flagged directly, independent
+  of the hunk-based comparison. See `review_zero.py`,
+  `test_renaming_a_doc_to_a_different_directory_breaks_its_own_relative_link`.
+- **P1 — a document-wide set let a coincidental value match hide a real repair-vs-inherited
+  distinction.** The round-7 fix compared each citation against the *whole document's* base
+  citations as a set, so a citation repaired to a `(path, num)` pair that happened to equal some
+  *other*, unrelated citation's value elsewhere in the same document was misclassified as
+  "inherited" and wrongly checked. Reference provenance is now scoped to the specific diff hunk each
+  HEAD line belongs to — its own hunk's pre-image is the narrowest correct comparison set, since two
+  independent edits in the same file normally land in separate hunks. Added `file_hunk_old_content`
+  to capture each hunk's exact old-side text alongside its new-side line range. See `review_zero.py`,
+  `test_repaired_citation_matching_a_different_deleted_citations_value_is_not_reflagged`.
+- **Proactive — the same new-path-instead-of-old-path bug affected `shrunk`/`restructured`
+  detection for renamed non-doc files.** While fixing the base-content lookup above, the same root
+  cause was found one function up: `impact()`'s `blob_line_count(base, path)` call used the *new*
+  path for every candidate, including renamed ones — a renamed source file could never be detected
+  as shrunk or restructured, since its blob never existed under the new name at `base`. `impact()`
+  now looks up a renamed candidate's line count at its *old* path (`file_hunks`, used for the
+  restructured check, already diffs with `-M` and needed no change). Not something Codex flagged
+  this round, but the identical bug in code already being touched, so it travels with this fix.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (27/27) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-8 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.

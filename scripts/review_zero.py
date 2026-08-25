@@ -54,6 +54,7 @@ class Impact:
     shrunk: frozenset[str]
     deleted_dirs: frozenset[str]
     restructured: frozenset[str]
+    renamed: frozenset[str]  # new paths of files renamed by this PR
 
 
 def git(*args: str) -> str:
@@ -100,7 +101,9 @@ def blob_line_count(ref: str, path: str) -> int | None:
 def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
     """(old_start, old_count, new_start, new_count) for each diff hunk on path."""
     try:
-        diff = git("diff", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
+        # -M so a renamed path's hunks still diff against its true prior
+        # content instead of reading as a full add with no history.
+        diff = git("diff", "-M", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
     except subprocess.CalledProcessError:
         return ()
     hunks: list[tuple[int, int, int, int]] = []
@@ -113,6 +116,40 @@ def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
         new_start = int(match.group(3))
         new_count = int(match.group(4)) if match.group(4) is not None else 1
         hunks.append((old_start, old_count, new_start, new_count))
+    return tuple(hunks)
+
+
+@lru_cache(maxsize=None)
+def file_hunk_old_content(base: str, path: str) -> tuple[tuple[int, int, str], ...]:
+    """(new_start, new_count, old_text) for each diff hunk on path — the
+    hunk's new-side line range in HEAD, paired with the exact old-side line
+    content (pre-image) it replaced. `-M` so a rename still diffs against
+    the file's true prior content rather than showing as a fresh add with
+    an empty pre-image."""
+    try:
+        diff = git("diff", "-M", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
+    except subprocess.CalledProcessError:
+        return ()
+    hunks: list[tuple[int, int, str]] = []
+    new_start = new_count = 0
+    old_lines: list[str] = []
+    in_hunk = False
+    for raw in diff.splitlines():
+        match = FULL_HUNK_RE.match(raw)
+        if match:
+            if in_hunk:
+                hunks.append((new_start, new_count, "\n".join(old_lines)))
+            new_start = int(match.group(3))
+            new_count = int(match.group(4)) if match.group(4) is not None else 1
+            old_lines = []
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if raw.startswith("-") and not raw.startswith("---"):
+            old_lines.append(raw[1:])
+    if in_hunk:
+        hunks.append((new_start, new_count, "\n".join(old_lines)))
     return tuple(hunks)
 
 
@@ -162,6 +199,8 @@ def added_lines(base: str) -> dict[str, list[tuple[int, str]]]:
 def impact(base: str) -> Impact:
     deleted: set[str] = set()
     candidates: set[str] = set()
+    renamed: set[str] = set()
+    renamed_from: dict[str, str] = {}
     raw = git("diff", "--name-status", "-M", f"{base}...HEAD")
     for line in raw.splitlines():
         fields = line.split("\t")
@@ -169,6 +208,8 @@ def impact(base: str) -> Impact:
         if status.startswith("R") and len(fields) >= 3:
             deleted.add(fields[1])
             candidates.add(fields[2])
+            renamed.add(fields[2])
+            renamed_from[fields[2]] = fields[1]
         elif status == "D" and len(fields) >= 2:
             deleted.add(fields[1])
         elif status in {"M", "A"} and len(fields) >= 2:
@@ -177,9 +218,13 @@ def impact(base: str) -> Impact:
     shrunk: set[str] = set()
     restructured: set[str] = set()
     for path in candidates:
-        if path not in tree_paths(base) or path not in tree_paths("HEAD"):
+        # A renamed file's blob lookup needs its *old* path — `git show`
+        # does no rename resolution of its own, so looking up the new path
+        # at `base` always misses (it never existed under that name there).
+        old_path = renamed_from.get(path, path)
+        if old_path not in tree_paths(base) or path not in tree_paths("HEAD"):
             continue
-        before = blob_line_count(base, path)
+        before = blob_line_count(base, old_path)
         after = blob_line_count("HEAD", path)
         if before is not None and after is not None and after < before:
             shrunk.add(path)
@@ -195,7 +240,10 @@ def impact(base: str) -> Impact:
     # file that kept it in the tree is deleted, even though no path in
     # `deleted` names the directory itself — derive that from the tree diff.
     deleted_dirs = tree_dirs(base) - tree_dirs("HEAD")
-    return Impact(frozenset(deleted), frozenset(shrunk), frozenset(deleted_dirs), frozenset(restructured))
+    return Impact(
+        frozenset(deleted), frozenset(shrunk), frozenset(deleted_dirs),
+        frozenset(restructured), frozenset(renamed),
+    )
 
 
 def markdown_lines(ref: str, path: str) -> list[str]:
@@ -250,30 +298,47 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
 
 def check_impacted_references(base: str, change: Impact) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
-    if not change.deleted and not change.shrunk and not change.deleted_dirs and not change.restructured:
+    if (not change.deleted and not change.shrunk and not change.deleted_dirs
+            and not change.restructured and not change.renamed):
         return []
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
+    dirs = tree_dirs("HEAD")
     for doc in sorted(p for p in current_paths if p.endswith(".md")):
         doc_dir = posixpath.dirname(doc)
-        base_text = "\n".join(markdown_lines(base, doc))
-        # Scope the "is this reference actually inherited from base?" check
-        # to the reference itself, not the line it sits on — a line can be
-        # edited for an unrelated reason while carrying over an untouched
-        # citation/link verbatim, and a line-level skip would hide that
-        # citation from impact scanning entirely (check_added_* only catches
-        # it if the target's *containing directory* also still exists).
-        base_targets = {
-            posixpath.normpath(posixpath.join(doc_dir, clean))
-            for target in MD_LINK_RE.findall(base_text)
-            if not re.match(r"^(https?:|mailto:|#|<)", target)
-            for clean in [target.split("#", 1)[0].strip()]
-            if clean
-        }
-        base_citations = set(CITATION_RE.findall(base_text))
+        # Scope "is this reference inherited from base?" to the hunk the
+        # HEAD line sits in, not the whole document. A document-wide set
+        # of base references is too coarse: an identical (path, num) pair
+        # existing anywhere else in the file — e.g. a citation this PR
+        # correctly repaired to a value some *other*, unrelated line already
+        # cited — would misclassify the fresh repair as "inherited" and
+        # apply the impact check to it. A hunk sits well within a genuine
+        # copy of two independent edits, e.g. deleting one citation's line
+        # and separately repairing another, so its own pre-image is the
+        # right — and narrowest — comparison scope.
+        hunks = file_hunk_old_content(base, doc)
         for lineno, text in enumerate(markdown_lines("HEAD", doc), 1):
             if IGNORE_TOKEN in text:
                 continue
+            local_old_text = next(
+                (old_text for new_start, new_count, old_text in hunks
+                 if new_count > 0 and new_start <= lineno < new_start + new_count),
+                None,
+            )
+            # None means this HEAD line isn't covered by any hunk's added
+            # range — it's byte-identical to its base counterpart, so every
+            # reference on it is trivially inherited; skip building a local
+            # comparison set and just check them all.
+            local_targets = local_citations = None
+            if local_old_text is not None:
+                local_targets = {
+                    posixpath.normpath(posixpath.join(doc_dir, clean))
+                    for target in MD_LINK_RE.findall(local_old_text)
+                    if not re.match(r"^(https?:|mailto:|#|<)", target)
+                    for clean in [target.split("#", 1)[0].strip()]
+                    if clean
+                }
+                local_citations = set(CITATION_RE.findall(local_old_text))
             for target in MD_LINK_RE.findall(text):
                 if re.match(r"^(https?:|mailto:|#|<)", target):
                     continue
@@ -281,7 +346,20 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                 if not clean:
                     continue
                 resolved = posixpath.normpath(posixpath.join(doc_dir, clean))
-                if resolved not in base_targets:
+                if doc in change.renamed and resolved not in current_paths and resolved not in dirs:
+                    # Moving this document changes what its own relative
+                    # links resolve against, even when the link text itself
+                    # is untouched — `check_added_md_links` never sees this
+                    # line (a pure rename has no added lines), and the
+                    # hunk/base comparison below only catches targets that
+                    # were themselves deleted, not links broken purely by
+                    # their own document's move.
+                    found.append(Finding(
+                        "FAIL", "md-link-impact", doc, lineno,
+                        f"link `{target}` resolves to missing `{resolved}` — this document's own "
+                        "rename changed what its relative links resolve against",
+                    ))
+                if local_targets is not None and resolved not in local_targets:
                     # This exact link target isn't inherited from base — it's
                     # new or edited content already validated against current
                     # HEAD by check_added_md_links.
@@ -292,12 +370,13 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                         f"existing link `{target}` targets `{resolved}`, deleted/renamed by this PR",
                     ))
             for cited, num in CITATION_RE.findall(text):
-                if (cited, num) not in base_citations:
+                if local_citations is not None and (cited, num) not in local_citations:
                     # Same reasoning as links: an untouched citation carries
-                    # the exact same (path, line-number) pair over from base.
-                    # A changed one — including a repair the PR made to a
-                    # citation shifted by its own earlier edit — won't match
-                    # and is already covered by check_added_citations.
+                    # the exact same (path, line-number) pair over from the
+                    # same hunk's pre-image. A changed one — including a
+                    # repair the PR made to a citation shifted by its own
+                    # earlier edit — won't match and is already covered by
+                    # check_added_citations.
                     continue
                 if cited in change.deleted:
                     found.append(Finding(
@@ -452,10 +531,11 @@ def main() -> int:
         print(
             f"review-zero: base={base} · {len(added)} file(s) with added lines · {n_lines} added line(s)"
         )
-        if change.deleted or change.shrunk or change.deleted_dirs or change.restructured:
+        if change.deleted or change.shrunk or change.deleted_dirs or change.restructured or change.renamed:
             print(
                 f"impact scan: {len(change.deleted)} deleted/renamed · {len(change.shrunk)} shrunk target(s) · "
-                f"{len(change.deleted_dirs)} deleted dir(s) · {len(change.restructured)} restructured target(s)"
+                f"{len(change.deleted_dirs)} deleted dir(s) · {len(change.restructured)} restructured target(s) · "
+                f"{len(change.renamed)} renamed doc(s)/file(s)"
             )
         for finding in findings:
             where = f"{finding.path}:{finding.line}" if finding.path != "<diff>" else finding.path
