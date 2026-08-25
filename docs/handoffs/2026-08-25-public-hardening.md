@@ -235,11 +235,11 @@ Codex round-7 fixes are validated by local regression tests and `review_zero.py`
   doc that path never existed at `base`, so `base_text` came back empty and every one of its
   references was treated as "not inherited", exempting the whole moved document from the impact
   scan. Separately, moving a doc to a different directory changes what its *own* relative links
-  resolve against even when their text is completely untouched (a relative link to `b.md` written in
-  `docs/a.md` resolves to `docs/b.md`; the same untouched link text in `guides/a.md` resolves to
-  `guides/b.md` instead) — a case neither the base-comparison check nor `check_added_md_links` was
-  ever built to catch, since a pure rename has no added lines at all. Fixed both: `impact()` now
-  tracks renamed new-paths (`Impact.renamed`),
+  resolve against even when their text is completely untouched — a sibling-file link written in the
+  doc's old location resolves against a different base directory once the doc moves, even though
+  nothing about the link itself changed — a case neither the base-comparison check nor
+  `check_added_md_links` was ever built to catch, since a pure rename has no added lines at all.
+  Fixed both: `impact()` now tracks renamed new-paths (`Impact.renamed`),
   and any link in a renamed doc that doesn't resolve in current HEAD is flagged directly, independent
   of the hunk-based comparison. See `review_zero.py`,
   `test_renaming_a_doc_to_a_different_directory_breaks_its_own_relative_link`.
