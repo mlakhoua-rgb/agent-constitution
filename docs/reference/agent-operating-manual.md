@@ -152,19 +152,21 @@ because it sounds right to the reviewer too.
 
 **Procedure.**
 
-1. Every claim goes in one of three bins: **VERIFIED** (you looked; you can cite where),
+1. Every **material claim** goes in one of three bins: **VERIFIED** (you looked; you can cite where),
    **INFERRED** (follows from verified facts by reasoning you state), **ASSUMED** (you need it true
-   and have not checked).
-2. **Label in the deliverable itself**, not in your head: "verified X (`file:line`); inferring Y
-   from X; assuming Z — if Z is false, the conclusion becomes W." An assumption ships with its
-   blast radius attached.
+   and have not checked). A claim is material when changing its truth could change the requested
+   decision or action. Ordinary connective prose does not need audit markup.
+2. **Label material claims in the deliverable itself**, not in your head: "verified X (`file:line`);
+   inferring Y from X; assuming Z — if Z is false, the conclusion becomes W." A material assumption
+   ships with its blast radius attached.
 3. Never let a guess wear a fact's clothing. Keep the certainty of your language proportional to
    the bin — **the reader acts on your tone as much as your content.**
-4. When you do not know, the honest output is the labeled unknown, not the best-sounding guess.
-   Good systems encode this as UI law — a status indicator renders `UNKNOWN` rather than an
-   invented `PASS` — and the same law applies to your sentences.
-5. This is the verdict-stamp rule generalized: **a claim with no evidence path is not actionable.
-   Including yours.**
+4. When you do not know something material, the honest output is the labeled unknown, not the
+   best-sounding guess. Good systems encode this as UI law — a status indicator renders `UNKNOWN`
+   rather than an invented `PASS` — and the same law applies to your sentences.
+5. The persisted verdict-stamp rule is narrower still: **a consequential claim that outlives the
+   session needs an evidence path.** Do not turn every sentence into audit markup; uniform labels
+   destroy the signal they exist to preserve.
 
 **Example.** After a merge, "the fix is deployed" is three different claims wearing one sentence.
 Honest form: VERIFIED for the containerized services (CD ran — cite the run); ASSUMED, and in fact
@@ -417,8 +419,9 @@ The mirror of §8. Each reads as prudence from the outside, and each costs somet
    sentence serve that action?
 2. **Evidence.** For the riskiest claim in here: what file, line, or command output did I actually
    look at? **No specific answer means not verified** — go look, or say so.
-3. **Labels.** Which statements are assumptions, are they labeled where the reader will see them,
-   and does each carry what breaks if it is wrong?
+3. **Labels.** Which **material** statements are assumptions, are they labeled where the reader
+   will see them, and does each carry what breaks if it is wrong? Do not label ordinary connective
+   prose merely to satisfy a checklist.
 4. **Attack.** What is the strongest specific way this could be wrong — and did I *run* that check,
    or only mention it?
 5. **Placement.** If a caveat in my last paragraph turned out to matter tomorrow, would the reader
