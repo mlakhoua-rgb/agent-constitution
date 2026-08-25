@@ -89,6 +89,49 @@ class StateContractTests(unittest.TestCase):
         self.assertIsNone(records[0].stamp)
         self.assertIsNone(records[0].age_days)
 
+    def test_populated_row_without_name_is_flagged_not_dropped(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| | agent | active | `2020-01-01` | detail |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        # A real row that lost its name cell but still carries other data
+        # must surface as an invalid record, not vanish like the unfilled
+        # `<name>` template placeholder row does.
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0].stamp)
+        self.assertIsNone(records[0].age_days)
+
+    def test_template_placeholder_row_is_still_silently_skipped(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| `<name>` | `<agent / human>` | `<one line>` | `<YYYY-MM-DD>` | `handoffs/<file>.md` |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        self.assertEqual(records, [])
+
+    def test_missing_required_section_is_flagged_not_dropped(self) -> None:
+        text = """\
+## NEXT — as-of: 2026-08-24
+
+Some content, no NOW heading at all.
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {"NOW": 3, "NEXT": 3}, 7)
+        # A required heading that is missing or misspelled must not simply
+        # produce no record for it — that reads as "nothing to check"
+        # instead of "the freshness contract is disabled here".
+        by_name = {r.name: r for r in records}
+        self.assertIn("NOW", by_name)
+        self.assertIsNone(by_name["NOW"].stamp)
+        self.assertIsNone(by_name["NOW"].age_days)
+        self.assertEqual(by_name["NEXT"].age_days, 1)
+
     def test_active_workstreams_heading_does_not_need_fake_section_stamp(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS

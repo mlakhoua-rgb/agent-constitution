@@ -62,6 +62,24 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_shrunk_source_with_earlier_deletion_shifts_existing_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Deleting the first line shifts every later line up by one: line 3
+        # ("three") is now line 2, and line 3 is what used to be line 4
+        # ("four"). The citation number is still within the new EOF, so the
+        # bounds-only check alone would call this clean.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\n", encoding="utf-8")
+        self.commit(root, "delete first line")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
     def test_deleting_last_file_in_directory_breaks_existing_directory_link(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

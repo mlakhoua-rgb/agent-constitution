@@ -93,3 +93,31 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-2 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, this handoff.
+
+## Round 3 — Codex re-review on commit `e803167` found three more issues
+
+- **P1 — a populated workstream row without a name cell is dropped, not flagged.** The nameless-row
+  skip used the same branch as the unfilled `<name>` template placeholder, so a real row that lost
+  its first cell (still carrying owner/status/date/detail data) vanished from the record set exactly
+  like an intentionally-empty template row does. The template placeholder (`name.startswith("<")`)
+  is still skipped silently; any other populated-but-nameless row now emits an invalid freshness
+  record instead. See `state_contract.py`, `test_populated_row_without_name_is_flagged_not_dropped`.
+- **P1 — a missing or misspelled required section heading produces no record at all.**
+  `section_freshness` only ever emitted a record when it found a matching heading, so a deleted or
+  misspelled `## NOW` disappeared from the output with fresh NOW/NEXT surrounding it hiding nothing
+  — there was no failure to see. The function now tracks which required keys were actually matched
+  and synthesizes an invalid record for any that never appeared (the `ACTIVE WORKSTREAMS` heading
+  still counts as present without needing its own stamp, since its freshness comes from
+  `workstream_freshness`). See `state_contract.py`, `test_missing_required_section_is_flagged_not_dropped`.
+- **P1 — a citation surviving EOF can still point at shifted content.** The shrink check only
+  compared the cited line number against the new end-of-file, so a deletion earlier in the file that
+  shifts every later line up by one (e.g. line 3 used to be "three", now names what was line 4) read
+  as clean whenever the number stayed within bounds. `check_impacted_references` now also inspects
+  the file's diff hunks: any hunk with an unequal old/new line count at or before the cited line
+  number marks the citation as impacted, not just an out-of-bounds one. See `review_zero.py`,
+  `test_shrunk_source_with_earlier_deletion_shifts_existing_citation`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (15/15) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-3 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

@@ -44,17 +44,33 @@ def section_freshness(
     ttl_days: dict[str, int],
 ) -> list[Freshness]:
     out: list[Freshness] = []
+    seen: set[str] = set()
     for line in text.splitlines():
         match = SECTION_RE.match(line.strip())
         if not match:
             continue
         name = match.group(1).strip()
-        ttl = next((v for k, v in ttl_days.items() if name.startswith(k)), None)
-        if ttl is None or name.startswith("ACTIVE WORKSTREAMS"):
+        key = next((k for k in ttl_days if name.startswith(k)), None)
+        if key is None:
             continue
+        if name.startswith("ACTIVE WORKSTREAMS"):
+            # ACTIVE WORKSTREAMS carries no section-level stamp of its own —
+            # freshness comes from workstream_freshness's per-row records —
+            # but the heading being present still counts as "not missing".
+            seen.add(key)
+            continue
+        seen.add(key)
         stamp_match = AS_OF_RE.search(match.group(2) or "")
         stamp = stamp_match.group(1) if stamp_match else None
-        out.append(Freshness(name, stamp, _age(stamp, today), ttl, "section"))
+        out.append(Freshness(name, stamp, _age(stamp, today), ttl_days[key], "section"))
+
+    for key, ttl in ttl_days.items():
+        if key not in seen:
+            # A required heading (e.g. `## NOW`) that is absent or misspelled
+            # must not silently disappear from the record set — it disables
+            # that part of the freshness contract with no failure to show
+            # for it. Synthesize an invalid record so it fails closed.
+            out.append(Freshness(key, None, None, ttl, "section"))
     return out
 
 
@@ -120,7 +136,19 @@ def workstream_freshness(
         row = dict(zip(columns, cells))
         name = row.get("workstream", "").strip("` ")
         stamp_raw = row.get("as of", "").strip("` ")
-        if not name or name.startswith("<"):
+        if name.startswith("<"):
+            # Unfilled template placeholder row (`<name>`) — not a real
+            # workstream, nothing to validate.
+            continue
+        if not name:
+            # A populated row that lost its name cell is still a real row
+            # with real data — reserve the silent skip for the template
+            # placeholder above, and report this one instead of letting a
+            # malformed or stale workstream disappear from the record set.
+            if any(c.strip("` ") for c in cells):
+                out.append(Freshness(
+                    "<unnamed workstream row>", None, None, ttl_days, "workstream"
+                ))
             continue
         stamp = stamp_raw if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp_raw) else None
         out.append(Freshness(name, stamp, _age(stamp, today), ttl_days, "workstream"))

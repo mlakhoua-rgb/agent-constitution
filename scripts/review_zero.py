@@ -35,6 +35,7 @@ MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 STATUS_RE = re.compile(r"STATUS:\s*([A-Za-z_|/ ]+)")
 GET_DEFAULT_RE = re.compile(r"\.get\(\s*[\"'][\w.]+[\"']\s*,\s*(?!\)).+?\)")
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+FULL_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 IGNORE_TOKEN = "rz-ignore"
 
 
@@ -92,6 +93,37 @@ def blob_line_count(ref: str, path: str) -> int | None:
         return len(git("show", f"{ref}:{path}").splitlines())
     except subprocess.CalledProcessError:
         return None
+
+
+@lru_cache(maxsize=None)
+def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
+    """(old_start, old_count, new_start, new_count) for each diff hunk on path."""
+    try:
+        diff = git("diff", "--unified=0", "--no-color", f"{base}...HEAD", "--", path)
+    except subprocess.CalledProcessError:
+        return ()
+    hunks: list[tuple[int, int, int, int]] = []
+    for raw in diff.splitlines():
+        match = FULL_HUNK_RE.match(raw)
+        if not match:
+            continue
+        old_start = int(match.group(1))
+        old_count = int(match.group(2)) if match.group(2) is not None else 1
+        new_start = int(match.group(3))
+        new_count = int(match.group(4)) if match.group(4) is not None else 1
+        hunks.append((old_start, old_count, new_start, new_count))
+    return tuple(hunks)
+
+
+def citation_line_shifted(base: str, path: str, num: int) -> bool:
+    """True if a net line-count change at or before `num` could have moved
+    what that line number now points at, even though `num` is still within
+    the new EOF — e.g. deleting an earlier line shifts every later line up
+    by one, so an unchanged citation number now names different content."""
+    return any(
+        old_count != new_count and new_start <= num
+        for old_start, old_count, new_start, new_count in file_hunks(base, path)
+    )
 
 
 def added_lines(base: str) -> dict[str, list[tuple[int, str]]]:
@@ -197,7 +229,7 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
     return found
 
 
-def check_impacted_references(change: Impact) -> list[Finding]:
+def check_impacted_references(base: str, change: Impact) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
     if not change.deleted and not change.shrunk and not change.deleted_dirs:
         return []
@@ -228,10 +260,17 @@ def check_impacted_references(change: Impact) -> list[Finding]:
                     ))
                 elif cited in change.shrunk and num:
                     total = blob_line_count("HEAD", cited)
-                    if total is not None and int(num) > total:
+                    n = int(num)
+                    if total is not None and n > total:
                         found.append(Finding(
                             "FAIL", "citation-impact", doc, lineno,
                             f"existing citation `{cited}:{num}` exceeds new EOF ({total}) after shrink",
+                        ))
+                    elif citation_line_shifted(base, cited, n):
+                        found.append(Finding(
+                            "FAIL", "citation-impact", doc, lineno,
+                            f"existing citation `{cited}:{num}` may point at shifted content — an "
+                            "earlier deletion in this PR moved what that line number now names",
                         ))
     return found
 
@@ -349,7 +388,7 @@ def main() -> int:
     findings: list[Finding] = []
     findings += check_added_citations(added)
     findings += check_added_md_links(added)
-    findings += check_impacted_references(change)
+    findings += check_impacted_references(base, change)
     findings += check_status_grammar(added)
     findings += check_migrations(base, added)
     findings += check_param_defaults(added)
