@@ -82,6 +82,7 @@ def workstream_freshness(
     """Parse the ACTIVE WORKSTREAMS markdown table and return one record per row."""
     lines = text.splitlines()
     in_section = False
+    section_seen = False
     header_checked = False
     header_seen = False
     columns: list[str] = []
@@ -92,6 +93,7 @@ def workstream_freshness(
         if stripped.startswith("## "):
             if stripped.startswith("## ACTIVE WORKSTREAMS"):
                 in_section = True
+                section_seen = True
                 header_checked = False
                 header_seen = False
                 columns = []
@@ -152,6 +154,12 @@ def workstream_freshness(
             continue
         stamp = stamp_raw if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp_raw) else None
         out.append(Freshness(name, stamp, _age(stamp, today), ttl_days, "workstream"))
+
+    if not section_seen:
+        # A deleted or misspelled `## ACTIVE WORKSTREAMS` heading must not
+        # just yield an empty row set — that reads as "no workstreams to
+        # check" instead of "the entire row-level freshness guard is gone".
+        out.append(Freshness("ACTIVE WORKSTREAMS section", None, None, ttl_days, "workstream"))
 
     return out
 

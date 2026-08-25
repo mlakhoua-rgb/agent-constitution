@@ -121,3 +121,27 @@ All three are fixed and regression-tested; `python -m unittest discover -s tests
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-3 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 4 — Codex re-review on commit `32d410e` found two more issues
+
+- **P1 — the round-3 citation-shift check only ran on files that net-shrank.** `citation_line_shifted`
+  was gated on `cited in change.shrunk`, so a file that lost a line before an existing citation but
+  also gained a line elsewhere (net same size, or even growing) never entered `shrunk` and the check
+  never ran, even though the cited line number now names different content. `impact()` now derives a
+  separate `restructured` set from any file with at least one diff hunk whose old/new line counts
+  differ — independent of net file size — and the shift check runs whenever a cited file is in either
+  set; the EOF-exceeded check stays scoped to `shrunk` specifically, since only a net-shrinking file
+  can newly break that bound. See `review_zero.py`,
+  `test_restructured_non_shrinking_file_shifts_existing_citation`.
+- **P1 — deleting the ACTIVE WORKSTREAMS heading itself disables the whole row-level guard.** Both
+  consumers' required-section maps (`SECTION_TTLS`) only ever listed `NOW`/`NEXT`; `workstream_freshness`
+  had no presence check of its own, so a deleted or misspelled `## ACTIVE WORKSTREAMS` heading simply
+  produced zero workstream rows — indistinguishable from "no workstreams exist yet". The function now
+  tracks whether the heading was seen at all and, if not, emits an invalid record — distinct from the
+  existing "malformed table header" case, which fires only when the heading is present but its column
+  row isn't. See `state_contract.py`, `test_missing_active_workstreams_section_is_flagged_not_dropped`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (17/17) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-4 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

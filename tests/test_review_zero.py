@@ -80,6 +80,23 @@ class ReviewZeroImpactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("citation-impact", result.stdout)
 
+    def test_restructured_non_shrinking_file_shifts_existing_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line and add a new line at the end: net line
+        # count is unchanged (the file never enters `shrunk`), but line 3
+        # now names what used to be line 4 ("four") instead of "three".
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\nfive\nsix\n", encoding="utf-8")
+        self.commit(root, "delete first line, add a line at the end")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
     def test_deleting_last_file_in_directory_breaks_existing_directory_link(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

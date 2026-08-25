@@ -53,6 +53,7 @@ class Impact:
     deleted: frozenset[str]
     shrunk: frozenset[str]
     deleted_dirs: frozenset[str]
+    restructured: frozenset[str]
 
 
 def git(*args: str) -> str:
@@ -164,6 +165,7 @@ def impact(base: str) -> Impact:
             candidates.add(fields[1])
 
     shrunk: set[str] = set()
+    restructured: set[str] = set()
     for path in candidates:
         if path not in tree_paths(base) or path not in tree_paths("HEAD"):
             continue
@@ -171,12 +173,19 @@ def impact(base: str) -> Impact:
         after = blob_line_count("HEAD", path)
         if before is not None and after is not None and after < before:
             shrunk.add(path)
+        # A file can be net the same size or even grow while still moving
+        # existing content around — a deleted line and an unrelated added
+        # line elsewhere both show up as hunks with unequal old/new counts.
+        # `shrunk` alone misses that: gate the citation-shift check on
+        # this broader set instead of net file size.
+        if any(old_count != new_count for _os, old_count, _ns, new_count in file_hunks(base, path)):
+            restructured.add(path)
 
     # A directory link (e.g. `[docs](docs/)`) is invalidated when the last
     # file that kept it in the tree is deleted, even though no path in
     # `deleted` names the directory itself — derive that from the tree diff.
     deleted_dirs = tree_dirs(base) - tree_dirs("HEAD")
-    return Impact(frozenset(deleted), frozenset(shrunk), frozenset(deleted_dirs))
+    return Impact(frozenset(deleted), frozenset(shrunk), frozenset(deleted_dirs), frozenset(restructured))
 
 
 def markdown_lines(ref: str, path: str) -> list[str]:
@@ -231,7 +240,7 @@ def check_added_md_links(added: dict[str, list[tuple[int, str]]]) -> list[Findin
 
 def check_impacted_references(base: str, change: Impact) -> list[Finding]:
     """Check only inbound references whose target this PR can invalidate."""
-    if not change.deleted and not change.shrunk and not change.deleted_dirs:
+    if not change.deleted and not change.shrunk and not change.deleted_dirs and not change.restructured:
         return []
     found: list[Finding] = []
     current_paths = tree_paths("HEAD")
@@ -258,10 +267,10 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                         "FAIL", "citation-impact", doc, lineno,
                         f"existing citation targets `{cited}`, deleted/renamed by this PR",
                     ))
-                elif cited in change.shrunk and num:
+                elif (cited in change.shrunk or cited in change.restructured) and num:
                     total = blob_line_count("HEAD", cited)
                     n = int(num)
-                    if total is not None and n > total:
+                    if cited in change.shrunk and total is not None and n > total:
                         found.append(Finding(
                             "FAIL", "citation-impact", doc, lineno,
                             f"existing citation `{cited}:{num}` exceeds new EOF ({total}) after shrink",
@@ -270,7 +279,7 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                         found.append(Finding(
                             "FAIL", "citation-impact", doc, lineno,
                             f"existing citation `{cited}:{num}` may point at shifted content — an "
-                            "earlier deletion in this PR moved what that line number now names",
+                            "earlier change in this PR moved what that line number now names",
                         ))
     return found
 
@@ -406,10 +415,10 @@ def main() -> int:
         print(
             f"review-zero: base={base} · {len(added)} file(s) with added lines · {n_lines} added line(s)"
         )
-        if change.deleted or change.shrunk or change.deleted_dirs:
+        if change.deleted or change.shrunk or change.deleted_dirs or change.restructured:
             print(
                 f"impact scan: {len(change.deleted)} deleted/renamed · {len(change.shrunk)} shrunk target(s) · "
-                f"{len(change.deleted_dirs)} deleted dir(s)"
+                f"{len(change.deleted_dirs)} deleted dir(s) · {len(change.restructured)} restructured target(s)"
             )
         for finding in findings:
             where = f"{finding.path}:{finding.line}" if finding.path != "<diff>" else finding.path

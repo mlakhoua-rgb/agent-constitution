@@ -132,6 +132,23 @@ Some content, no NOW heading at all.
         self.assertIsNone(by_name["NOW"].age_days)
         self.assertEqual(by_name["NEXT"].age_days, 1)
 
+    def test_missing_active_workstreams_section_is_flagged_not_dropped(self) -> None:
+        text = """\
+## NOW — as-of: 2026-08-24
+
+## NEXT — as-of: 2026-08-24
+
+No ACTIVE WORKSTREAMS heading anywhere in this document.
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {"NOW": 3, "NEXT": 3}, 7)
+        # A deleted or misspelled ACTIVE WORKSTREAMS heading must not just
+        # produce zero workstream rows — that reads as "no workstreams to
+        # check" instead of "the row-level guard is entirely disabled".
+        workstream_records = [r for r in records if r.source == "workstream"]
+        self.assertEqual(len(workstream_records), 1)
+        self.assertIsNone(workstream_records[0].stamp)
+        self.assertIsNone(workstream_records[0].age_days)
+
     def test_active_workstreams_heading_does_not_need_fake_section_stamp(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS
