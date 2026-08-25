@@ -34,6 +34,11 @@ The highest value-to-effort ratio in the whole framework. An afternoon of work.
 
 1. Copy `CLAUDE.md`, fill the `<PLACEHOLDERS>`. **Keep it under ~150 lines.** Length is what kills
    a constitution: past a certain size agents skim it, and a skimmed rule is not a rule.
+
+   The filename is not a vendor-authority statement. It is canonical here because some tools
+   auto-discover it. Keep the **content** tool-neutral. If you prefer `CONSTITUTION.md`, first verify
+   every target agent reliably follows a thin pointer to it; auto-discovery is part of the safety
+   contract, not a cosmetic detail.
 2. Copy `AGENTS.md` and any other entry-point filenames your tools look for
    (`.github/copilot-instructions.md`, `GEMINI.md`, `.cursorrules`). **Make every one of them a
    three-line pointer** at the canonical file. Never a copy — copies drift, and an agent will
@@ -51,9 +56,10 @@ The highest value-to-effort ratio in the whole framework. An afternoon of work.
    ```
 
 5. Copy `scripts/` now, even though its stages come later. `session_brief.py` and
-   `review_zero.py` are standalone and useful from day one; only `librarian.py` expects Stage 4's
-   `STATE.md`. The alternative — a constitution citing scripts that aren't in the tree — is a
-   broken citation in the one document every agent reads first.
+   `review_zero.py` are standalone and useful from day one; `state_contract.py` is their shared
+   freshness parser, and `librarian.py` expects Stage 4's `STATE.md`. The alternative — a
+   constitution citing scripts that aren't in the tree — is a broken citation in the one document
+   every agent reads first.
 
 > **Do not backfill decision history.** It will be reconstructed wrong — from memory, from commit
 > messages, from what feels like it must have happened — and then cited as fact by every agent
@@ -77,9 +83,10 @@ from a real incident. Ship it with the placeholder examples and it degrades into
 nobody applies under pressure. Replace them with your own incidents as you accumulate them —
 *this file should be the most-edited document in your repo.*
 
-Start enforcing two habits immediately, because they cost nothing and change everything:
+Start enforcing two habits immediately, because they cost little and change a lot:
 
-- **VERIFIED / INFERRED / ASSUMED labels** on claims in agent output.
+- **VERIFIED / INFERRED / ASSUMED labels on material claims** — claims whose truth could change the
+  requested decision or action. Do not label every sentence; uniform audit markup destroys signal.
 - **"The riskiest claim in this work is ___"** — one sentence, every deliverable.
 
 ---
@@ -87,7 +94,8 @@ Start enforcing two habits immediately, because they cost nothing and change eve
 ## Stage 3 — The review contract
 
 **Files:** `docs/reference/review-contract.md`, `.github/agent-review-guidelines.md`,
-`.github/PULL_REQUEST_TEMPLATE.md`, `scripts/review_zero.py`, `.github/workflows/review-zero.yml`
+`.github/PULL_REQUEST_TEMPLATE.md`, `scripts/review_zero.py`, `.github/workflows/review-zero.yml`,
+`tests/`
 
 1. **Write your standing invariants from your own incident history.** Do not adopt the shipped list
    wholesale. An invariant list assembled from best-practice articles will be long, generic, and
@@ -99,20 +107,25 @@ Start enforcing two habits immediately, because they cost nothing and change eve
 3. **Mine `review_zero.py`'s check list from your own merged PRs.** Read your review threads, find
    the findings that repeat, script the ones that are *decidable*. The shipped checks are a
    starting set, not the answer.
-4. **Adopt the iteration budget and the round-4 tripwire.** Cheap, and it catches the single most
+4. **Put regressions behind tests.** If a governance script bug could have returned a false clean,
+   add the smallest test that reproduces it before or with the fix. The shipped suite uses
+   `unittest` and temporary git repos so the reference implementation stays standard-library only.
+5. **Adopt the iteration budget and the round-4 tripwire.** Cheap, and it catches the single most
    expensive agentic-review failure: a 40-comment thread converging on nothing because both parties
    are patching symptoms of a bad decomposition.
 
-> **Do not skip the blast-radius rule.** Every mechanical check must run on **added lines only**.
-> Without it, adding a check retroactively fails every open PR sitting near old code — and the
-> team disables the check within a week.
+> **Do not misread the blast-radius rule as "added lines only, always."** Local semantic checks
+> should inspect what the PR introduces so old debt cannot block unrelated work. Referential
+> integrity is different: if a PR deletes, renames, or shrinks a target, existing inbound links and
+> `path:line` citations to **that impacted target** are in blast radius and must be checked even on
+> deletion-only diffs. Scope by causality, not by diff polarity.
 
 ---
 
 ## Stage 4 — Generated state
 
-**Files:** `docs/STATE.md`, `scripts/session_brief.py`, `scripts/librarian.py`,
-`.github/workflows/state-guard.yml`
+**Files:** `docs/STATE.md`, `scripts/session_brief.py`, `scripts/state_contract.py`,
+`scripts/librarian.py`, `.github/workflows/state-guard.yml`
 
 The most machinery, and worth it only once you genuinely have parallel workstreams that agents keep
 losing track of.
@@ -121,7 +134,8 @@ losing track of.
    gate on a doc nobody has internalized just produces label-spam.
 2. Wire `scripts/session_brief.py` as the session-start command in your constitution. Change the
    instruction from "read STATE.md first" to "run session_brief first" — that swap is the whole
-   point of the stage.
+   point of the stage. The brief reports repository state, open-PR context, current-branch CI when
+   an open PR exists, section freshness, and **each workstream row's freshness independently**.
 3. Run `scripts/librarian.py --check` on a daily schedule. Route its output somewhere a human
    actually sees.
 4. Add `state-guard.yml` **last** — and create its escape-hatch label first:
@@ -134,10 +148,10 @@ losing track of.
    doesn't exist fails closed with no documented way out — for every PR, including the ones that
    genuinely change nothing — and a gate like that gets disabled within a week.
 
-> **Expected on a fresh clone:** `librarian.py --check` exits non-zero, reporting that §NOW,
-> §NEXT, and §ACTIVE WORKSTREAMS carry no `as-of:` stamp. That is the tool working — the shipped
-> `STATE.md` has `<YYYY-MM-DD>` placeholders, and an unstamped section is exactly what it is
-> designed to flag. Replace the placeholders with real dates and it goes green.
+> **Expected on a fresh clone:** `librarian.py --check` exits non-zero because the shipped
+> `STATE.md` contains placeholder dates. NOW and NEXT are validated at the heading level; each real
+> ACTIVE WORKSTREAMS row is validated from its own `as-of` cell. There is intentionally **no**
+> section-level workstream stamp that could make a fresh heading hide an old row.
 
 ---
 
@@ -149,9 +163,10 @@ starts being marketing, and everyone correctly begins ignoring it.
 **The verdict stamp on clean reviews.** Without it you cannot distinguish "reviewed, nothing found"
 from "the reviewer crashed," and you will eventually merge on the second one.
 
-**"A well-evidenced author rebuttal closes a thread."** Without it, a confidently wrong reviewer
-holds correct PRs hostage, and authors learn to comply rather than argue. That's a much worse
-failure than the occasional bad rebuttal.
+**Evidence-backed rebuttals may resolve findings, but they do not manufacture approval.** A
+rebuttal can close the issue for iteration accounting; the independent reviewer still has to give
+the required green light on the latest commit. Conflating those two states makes the merge gate
+self-certifying.
 
 **"Review the code that is there, not the code you would have written."** A reviewer that taxes
 novelty trains the author out of it — and the whole reason to use capable agents is the work you
