@@ -116,6 +116,17 @@ class StateContractTests(unittest.TestCase):
         self.assertIsNone(by_name["NOW"].stamp)
         self.assertIsNone(by_name["NOW"].age_days)
 
+    def test_prefixed_as_of_marker_is_not_parsed_as_a_valid_stamp(self) -> None:
+        text = "## NOW — updated as-of: 2026-08-24\n"
+        records = all_freshness(text, dt.date(2026, 8, 25), {"NOW": 3}, 7)
+        # The grammar requires the metadata to *begin with* `as-of:` — a
+        # search anywhere in the string would also accept text with an
+        # unrelated word before the marker.
+        by_name = {r.name: r for r in records}
+        self.assertIn("NOW", by_name)
+        self.assertIsNone(by_name["NOW"].stamp)
+        self.assertIsNone(by_name["NOW"].age_days)
+
     def test_populated_row_without_name_is_flagged_not_dropped(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS

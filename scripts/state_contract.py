@@ -12,9 +12,11 @@ import re
 from dataclasses import dataclass
 
 SECTION_RE = re.compile(r"^## ([A-Z][A-Z /]+?)(?:\s*—\s*(.*))?\s*$")
-# Negative lookbehind so a malformed marker like `not-as-of:` — where
-# `as-of:` appears only as a substring — doesn't parse as the real thing.
-AS_OF_RE = re.compile(r"(?<![\w-])as-of:\s*(\d{4}-\d{2}-\d{2})")
+# Anchored at the start of the heading metadata (matched with .match(), not
+# .search()) — the documented grammar requires the metadata to *begin with*
+# `as-of:`, not merely contain it somewhere. An unanchored/substring search
+# would also accept `not-as-of:` or `updated as-of:` as the real marker.
+AS_OF_RE = re.compile(r"^as-of:\s*(\d{4}-\d{2}-\d{2})")
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,7 @@ def section_freshness(
             seen.add(key)
             continue
         seen.add(key)
-        stamp_match = AS_OF_RE.search(match.group(2) or "")
+        stamp_match = AS_OF_RE.match(match.group(2) or "")
         stamp = stamp_match.group(1) if stamp_match else None
         out.append(Freshness(name, stamp, _age(stamp, today), ttl_days[key], "section"))
 

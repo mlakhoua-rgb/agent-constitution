@@ -188,6 +188,29 @@ class ReviewZeroImpactTests(unittest.TestCase):
         result = self.review(root, base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_citation_repaired_only_for_a_rename_still_checks_the_line_number(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:3.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the cited file and delete its first line (shifting "three"
+        # from line 3 to line 2). The author correctly updates the citation
+        # path for the rename but leaves the line number untouched — the
+        # citation text changed, so it no longer matches base verbatim and
+        # would otherwise read as "new, already covered by
+        # check_added_citations", which only checks existence/EOF bounds
+        # and would miss that :3 now names "four" instead of "three".
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:3.\n", encoding="utf-8")
+        self.commit(root, "rename cited file, repair citation path only")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
     def test_adjacent_edits_merged_into_one_diff_block_still_match_per_line(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

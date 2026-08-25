@@ -311,3 +311,30 @@ All three are fixed and regression-tested, including the one honestly-labeled li
 are clean (only the pre-existing size WARN).
 
 Codex round-9 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 10 — Codex re-review on commit `a3fb6b5` found two more issues
+
+- **P1 — `AS_OF_RE` was anchored against the wrong kind of prefix.** The round-7 fix added a negative
+  lookbehind blocking a directly-attached prefix like `not-as-of:`, but metadata with an unrelated
+  *word* and a space before the marker — `## NOW — updated as-of: 2026-08-24` — still matched, since
+  the lookbehind only rejects a preceding word character or hyphen, not a preceding word-plus-space.
+  The documented grammar requires the metadata to *begin with* `as-of:`, not merely contain it
+  anywhere. Replaced the substring search with an anchored regex matched via `.match()` instead of
+  `.search()`, which subsumes the round-7 fix entirely (a simpler, correct fix for the same class of
+  bug). See `state_contract.py`, `test_prefixed_as_of_marker_is_not_parsed_as_a_valid_stamp`.
+- **P1 — a citation repaired only for a rename skipped the shift check entirely.** When a cited
+  source file is renamed and loses lines in the same PR, an author who updates just the citation
+  *path* (not the line number) produces citation text that doesn't match base verbatim — so
+  `doc_reference_pools` correctly treats it as "new," which is right for the path but wrong for the
+  number: the number was never touched, and `check_added_citations` only verifies existence and EOF
+  bounds, never a shift. The citation loop now also checks, for a citation that doesn't match locally,
+  whether its path is a rename target and the *old* path paired with the *same* number matched
+  locally — if so, the number is exactly as inherited as an untouched citation's and gets the full
+  shift check via `citation_line_shifted` against the new (renamed) path, which `_diff_pathspecs`
+  (round 9) already resolves correctly. See `review_zero.py`,
+  `test_citation_repaired_only_for_a_rename_still_checks_the_line_number`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (32/32) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-10 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.

@@ -423,7 +423,18 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                     # a repair the PR made to a citation shifted by its own
                     # earlier edit — won't match and is already covered by
                     # check_added_citations.
-                    continue
+                    #
+                    # One exception: if the cited *path* was itself renamed
+                    # and the author correctly updated the citation to the
+                    # new path but left the *line number* untouched, the
+                    # number's validity is still exactly as inherited as an
+                    # unedited citation's — check_added_citations only
+                    # verifies existence/EOF bounds, not a shift, so this is
+                    # the only place that number ever gets shift-checked.
+                    old_cited = rename_map(base).get(cited)
+                    rename_repaired_only = old_cited and (old_cited, num) in local_citations
+                    if not rename_repaired_only:
+                        continue
                 if cited in change.deleted:
                     found.append(Finding(
                         "FAIL", "citation-impact", doc, lineno,
