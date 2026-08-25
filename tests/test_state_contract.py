@@ -154,6 +154,24 @@ class StateContractTests(unittest.TestCase):
         records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
         self.assertEqual(records, [])
 
+    def test_malformed_name_starting_with_angle_bracket_is_not_treated_as_template(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | as-of | Detail |
+|---|---|---|---|---|
+| <payments | agent | active | `2020-01-01` | detail |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        # `<payments` is a malformed real row (a stray leading `<`), not
+        # the documented `<name>` template placeholder — a `startswith`
+        # check would silently skip it along with the real placeholder,
+        # hiding its stale date.
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].name, "<payments")
+        self.assertEqual(records[0].stamp, "2020-01-01")
+        self.assertEqual(records[0].age_days, 2428)
+
     def test_missing_required_section_is_flagged_not_dropped(self) -> None:
         text = """\
 ## NEXT — as-of: 2026-08-24

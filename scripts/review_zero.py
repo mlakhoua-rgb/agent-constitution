@@ -432,42 +432,51 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                         f"existing link `{target}` targets `{resolved}`, deleted/renamed by this PR",
                     ))
             for cited, num in CITATION_RE.findall(text):
-                if local_citations is not None:
-                    # Trust this citation as inherited from base only when
-                    # its path — either as cited here, or as it stood
-                    # before a rename this PR made — appears in the local
-                    # pool EXACTLY ONCE (raw occurrences, not distinct
-                    # numbers: two identical duplicate citations still
-                    # count as two) and that one occurrence's number
-                    # matches. A repair the PR made to a citation shifted
-                    # by its own earlier edit, or to a path this PR
-                    # renamed, won't match and is already covered by
-                    # check_added_citations for anything beyond the
-                    # exactly-inherited case below.
-                    #
-                    # Any other pooled occurrence of the same path — even
+                # Split "is this citation traceable to base at all" from
+                # "are we confident about its exact number" — deletion
+                # invalidates a citation regardless of which occurrence it
+                # traces back to, so it must not share a gate with the
+                # occurrence-precision the shift check needs.
+                old_cited = rename_map(base).get(cited)
+                candidate_paths = {cited} | ({old_cited} if old_cited else set())
+                if local_citations is None:
+                    # Unchanged line — every reference on it is trivially,
+                    # exactly inherited.
+                    number_confident = True
+                else:
+                    pooled = [n for p, n in local_citations if p in candidate_paths]
+                    if not pooled:
+                        # This path — current or pre-rename — never
+                        # appears in the local pool at all: fully new/
+                        # edited content, already covered by
+                        # check_added_citations.
+                        continue
+                    # Confident about the exact *number* only when its
+                    # path — either as cited here, or as it stood before a
+                    # rename this PR made — appears in the local pool
+                    # EXACTLY ONCE (raw occurrences, not distinct numbers:
+                    # two identical duplicate citations still count as
+                    # two) and that one occurrence's number matches. Any
+                    # other pooled occurrence of the same path — even
                     # without a rename, even a byte-identical duplicate —
                     # means we can't tell a genuine carryover from a stale
                     # leftover that coincidentally matches a *different*
-                    # occurrence's old text (e.g. two citations to one path
-                    # on a line, one dropped, the other correctly repaired
-                    # to a number that happens to equal the dropped one's).
-                    # `citation_line_shifted` can't verify a number's
-                    # correctness either — it just flags anything past a
-                    # shift point — so checking an ambiguous match would
-                    # false-alarm on a legitimate repair about as often as
-                    # it'd catch a real miss; exempt it instead.
-                    old_cited = rename_map(base).get(cited)
-                    candidate_paths = {cited} | ({old_cited} if old_cited else set())
-                    matches = [n for p, n in local_citations if p in candidate_paths]
-                    if matches != [num]:
-                        continue
+                    # occurrence's old text. `citation_line_shifted` can't
+                    # verify a number's correctness either — it just flags
+                    # anything past a shift point — so checking an
+                    # ambiguous number would false-alarm on a legitimate
+                    # repair about as often as it'd catch a real miss.
+                    # Deletion doesn't need this precision: the path being
+                    # pooled at all is enough to know it's not fresh
+                    # content, and a deleted file breaks every citation to
+                    # it no matter which occurrence is which.
+                    number_confident = pooled == [num]
                 if cited in change.deleted:
                     found.append(Finding(
                         "FAIL", "citation-impact", doc, lineno,
                         f"existing citation targets `{cited}`, deleted/renamed by this PR",
                     ))
-                elif (cited in change.shrunk or cited in change.restructured) and num:
+                elif (cited in change.shrunk or cited in change.restructured) and num and number_confident:
                     total = blob_line_count("HEAD", cited)
                     n = int(num)
                     if cited in change.shrunk and total is not None and n > total:

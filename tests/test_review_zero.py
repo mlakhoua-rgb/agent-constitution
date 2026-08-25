@@ -152,6 +152,33 @@ class ReviewZeroImpactTests(unittest.TestCase):
         result = self.review(root, base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_deleted_target_still_fails_even_with_ambiguous_pooled_citations(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "Some prose. See src/foo.py:1 and src/foo.py:2 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Edit the prose (unrelated to either citation) while leaving both
+        # citations untouched, and delete src/foo.py entirely. The two
+        # citations pooled on this line make the *shift* check ambiguous
+        # (round 12), but deletion doesn't need occurrence precision — a
+        # citation to a target that's simply gone is broken no matter
+        # which pooled occurrence it traces back to, and exempting it
+        # alongside the shift check would silently clear a real break.
+        (root / "src" / "foo.py").unlink()
+        (root / "docs" / "a.md").write_text(
+            "Some fixed prose. See src/foo.py:1 and src/foo.py:2 for details.\n",
+            encoding="utf-8",
+        )
+        self.commit(root, "delete cited file, edit unrelated prose")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("citation-impact", result.stdout)
+
     def test_offset_canceling_hunks_do_not_false_positive_on_an_unaffected_citation(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

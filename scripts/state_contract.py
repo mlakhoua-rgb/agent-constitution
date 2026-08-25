@@ -153,9 +153,11 @@ def workstream_freshness(
         row = dict(zip(columns, cells))
         name = row.get("workstream", "").strip("` ")
         stamp_raw = row.get("as of", "").strip("` ")
-        if name.startswith("<"):
-            # Unfilled template placeholder row (`<name>`) — not a real
-            # workstream, nothing to validate.
+        if name == "<name>":
+            # Unfilled template placeholder row — not a real workstream,
+            # nothing to validate. Exact match, not a prefix: `startswith`
+            # would also silently skip a malformed real row like `<payments`
+            # (a stray leading `<`), hiding its stale date from the guard.
             continue
         if not name:
             # A populated row that lost its name cell is still a real row

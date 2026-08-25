@@ -393,3 +393,26 @@ All three are fixed and regression-tested; `python -m unittest discover -s tests
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-12 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 13 — Codex re-review on commit `c24cbb3` found two more issues
+
+- **P1 — the round-12 ambiguity exemption also swallowed the deletion check.** The unified
+  occurrence-matching `continue` gated *every* downstream check on the citation's number being
+  unambiguous — but a fully deleted target breaks every citation to it regardless of which pooled
+  occurrence a given citation traces back to; occurrence precision only matters for the shift check,
+  which depends on an exact number. Split the two: a citation's path being traceable to base at all
+  (any pooled occurrence, regardless of number) is now enough to run the unambiguous
+  `cited in change.deleted` check, while the stricter "exactly one occurrence with a matching number"
+  gate applies only to the shrink/restructure shift check that actually needs that precision. See
+  `review_zero.py`, `test_deleted_target_still_fails_even_with_ambiguous_pooled_citations`.
+- **P1 — the workstream template-placeholder skip matched a prefix, not the exact placeholder.**
+  `name.startswith("<")` silently skipped any row whose name cell begins with `<` — not just the
+  documented `<name>` placeholder but also a malformed real row like `<payments` (a stray leading
+  `<`), hiding its stale date from the freshness guard. Changed to an exact match against the literal
+  placeholder string. See `state_contract.py`,
+  `test_malformed_name_starting_with_angle_bracket_is_not_treated_as_template`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` (38/38) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-13 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
