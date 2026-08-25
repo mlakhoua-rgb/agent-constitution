@@ -127,6 +127,17 @@ class StateContractTests(unittest.TestCase):
         self.assertIsNone(by_name["NOW"].stamp)
         self.assertIsNone(by_name["NOW"].age_days)
 
+    def test_as_of_marker_with_trailing_garbage_is_not_parsed_as_a_valid_stamp(self) -> None:
+        text = "## NOW — as-of: 2026-08-24oops\n"
+        records = all_freshness(text, dt.date(2026, 8, 25), {"NOW": 3}, 7)
+        # The grammar is exactly `as-of: YYYY-MM-DD` — a start-anchored but
+        # end-unanchored regex would still capture the date and ignore
+        # trailing garbage after it.
+        by_name = {r.name: r for r in records}
+        self.assertIn("NOW", by_name)
+        self.assertIsNone(by_name["NOW"].stamp)
+        self.assertIsNone(by_name["NOW"].age_days)
+
     def test_populated_row_without_name_is_flagged_not_dropped(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS

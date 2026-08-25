@@ -416,3 +416,17 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-13 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 14 — Codex re-review on commit `1e8400f` found one more issue
+
+- **P1 — `AS_OF_RE` was anchored at the start but not the end.** The round-10 fix required the
+  metadata to *begin with* `as-of:`, but `\d{4}-\d{2}-\d{2}` doesn't care what follows it — a
+  malformed value like `as-of: 2026-08-24oops` still matched, capturing the date and ignoring the
+  trailing garbage. Added a `\s*$` anchor after the date so the grammar is enforced end-to-end:
+  exactly `as-of: YYYY-MM-DD`, nothing more. See `state_contract.py`,
+  `test_as_of_marker_with_trailing_garbage_is_not_parsed_as_a_valid_stamp`.
+
+Fixed and regression-tested; `python -m unittest discover -s tests -v` (39/39) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-14 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, this handoff.

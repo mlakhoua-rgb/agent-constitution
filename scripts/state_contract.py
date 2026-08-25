@@ -12,11 +12,13 @@ import re
 from dataclasses import dataclass
 
 SECTION_RE = re.compile(r"^## ([A-Z][A-Z /]+?)(?:\s*—\s*(.*))?\s*$")
-# Anchored at the start of the heading metadata (matched with .match(), not
-# .search()) — the documented grammar requires the metadata to *begin with*
-# `as-of:`, not merely contain it somewhere. An unanchored/substring search
-# would also accept `not-as-of:` or `updated as-of:` as the real marker.
-AS_OF_RE = re.compile(r"^as-of:\s*(\d{4}-\d{2}-\d{2})")
+# Anchored at both ends of the heading metadata (matched with .match(), not
+# .search()) — the documented grammar is exactly `as-of: YYYY-MM-DD`, not
+# merely "contains that somewhere." An unanchored/substring search would
+# also accept `not-as-of:` or `updated as-of:` as the real marker; a
+# start-only anchor would still accept trailing garbage like
+# `as-of: 2026-08-24oops` since \d{2} doesn't care what follows it.
+AS_OF_RE = re.compile(r"^as-of:\s*(\d{4}-\d{2}-\d{2})\s*$")
 
 
 @dataclass(frozen=True)
