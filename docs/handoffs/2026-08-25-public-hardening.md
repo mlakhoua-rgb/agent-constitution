@@ -71,3 +71,25 @@ All three regressions are encoded under `tests/` and pass locally
 `0 FAIL` on the round-1 commit (one pre-existing size WARN, unrelated to this scope).
 
 Codex round-1 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 2 — Codex re-review on commit `1c397d4` found two more issues
+
+- **P1 — the round-1 handoff bullet's own illustrative directory-link example broke Review Zero.**
+  Writing the directory-link example as literal bracket/parenthesis markdown-link syntax made
+  `review_zero.py`'s own added-line link check parse it as a real link to a nonexistent path,
+  failing the required CI job. Reworded to describe the target in prose (commit `faccb40`); the
+  same commit also joined a wrapped `STATUS`/`evidence:` line that was tripping the status-grammar
+  WARN for the identical single-line-scan reason (commit `4d32f5e`).
+- **P1 — a malformed ACTIVE WORKSTREAMS header disables the whole row-level guard.** Every
+  unrecognized `|`-prefixed line in the section was retried as a header candidate forever, so a
+  misspelled or edited header column (e.g. `as-of` becoming `asof`) never set `header_seen` — no
+  row underneath it, however stale, was ever parsed as data, and `librarian.py --check` reported no
+  failures at all for that table. Only the first table row in the section is now treated as a
+  header candidate; if it doesn't declare the required columns, that is itself reported as an
+  invalid freshness record instead of the whole table silently vanishing. See `state_contract.py`,
+  `test_malformed_workstream_header_is_flagged_not_swallowed`.
+
+Both are fixed and regression-tested; `python -m unittest discover -s tests -v` and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-2 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, this handoff.

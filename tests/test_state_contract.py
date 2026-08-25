@@ -73,6 +73,22 @@ class StateContractTests(unittest.TestCase):
         self.assertIsNone(records[0].stamp)
         self.assertIsNone(records[0].age_days)
 
+    def test_malformed_workstream_header_is_flagged_not_swallowed(self) -> None:
+        text = """\
+## ACTIVE WORKSTREAMS
+
+| Workstream | Owner seat | Status | asof | Detail |
+|---|---|---|---|---|
+| `payments` | agent | active | `2020-01-01` | x |
+"""
+        records = all_freshness(text, dt.date(2026, 8, 25), {}, 7)
+        # A misspelled/edited header must not silently disable the row-level
+        # guard for every populated row underneath it — it must itself
+        # surface as an invalid freshness record.
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0].stamp)
+        self.assertIsNone(records[0].age_days)
+
     def test_active_workstreams_heading_does_not_need_fake_section_stamp(self) -> None:
         text = """\
 ## ACTIVE WORKSTREAMS

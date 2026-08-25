@@ -66,6 +66,7 @@ def workstream_freshness(
     """Parse the ACTIVE WORKSTREAMS markdown table and return one record per row."""
     lines = text.splitlines()
     in_section = False
+    header_checked = False
     header_seen = False
     columns: list[str] = []
     out: list[Freshness] = []
@@ -75,6 +76,7 @@ def workstream_freshness(
         if stripped.startswith("## "):
             if stripped.startswith("## ACTIVE WORKSTREAMS"):
                 in_section = True
+                header_checked = False
                 header_seen = False
                 columns = []
                 continue
@@ -84,11 +86,23 @@ def workstream_freshness(
             continue
 
         cells = [c.strip() for c in stripped.strip("|").split("|")]
-        if not header_seen:
+        if not header_checked:
+            # Only the first table row in the section is a header candidate.
+            # If it doesn't declare the columns we need, the table is
+            # malformed — report that as an invalid freshness record instead
+            # of silently re-trying every later row as a fresh "header"
+            # (which would swallow the whole table without ever failing).
+            header_checked = True
             normalized = [re.sub(r"[^a-z0-9]+", " ", c.lower()).strip() for c in cells]
             if "workstream" in normalized and "as of" in normalized:
                 columns = normalized
                 header_seen = True
+            else:
+                out.append(Freshness(
+                    "ACTIVE WORKSTREAMS table header", None, None, ttl_days, "workstream"
+                ))
+            continue
+        if not header_seen:
             continue
 
         if all(re.fullmatch(r":?-{3,}:?", c.replace(" ", "")) for c in cells):
