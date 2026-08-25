@@ -59,11 +59,12 @@ findings, all fixed in this PR with a regression test each:
   missing `as-of` value surfaces as a normal freshness failure instead of disappearing from the
   record set. See `state_contract.py`, `test_truncated_populated_row_is_not_silently_dropped`.
 - **P2 — directory links survive their last file's deletion.** `Impact.deleted` only ever held file
-  paths from `git diff --name-status`, so a link to a directory (e.g. `[docs](guide/)`) whose last
-  tracked file was deleted in a deletion-only diff resolved clean: the directory path was never in
-  `deleted`. `impact()` now also derives `deleted_dirs` as the set difference between the base and
-  HEAD directory trees, and `check_impacted_references` treats a link resolving into either set as
-  broken. See `review_zero.py`, `test_deleting_last_file_in_directory_breaks_existing_directory_link`.
+  paths from `git diff --name-status`, so a markdown link whose target is a directory (e.g. a
+  `guide/` path) that lost its last tracked file in a deletion-only diff resolved clean: the
+  directory path was never in `deleted`. `impact()` now also derives `deleted_dirs` as the set
+  difference between the base and HEAD directory trees, and `check_impacted_references` treats a
+  link resolving into either set as broken. See `review_zero.py`,
+  `test_deleting_last_file_in_directory_breaks_existing_directory_link`.
 
 All three regressions are encoded under `tests/` and pass locally
 (`python -m unittest discover -s tests -v`); `scripts/review_zero.py --base origin/main` reports
