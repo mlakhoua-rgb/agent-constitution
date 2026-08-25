@@ -152,6 +152,31 @@ class ReviewZeroImpactTests(unittest.TestCase):
         result = self.review(root, base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_rename_repair_exception_is_not_confused_by_a_second_citation_on_the_line(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and src/foo.py:3 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the cited file, delete its first line (shifting "three"
+        # from line 3 to line 2), drop the first citation entirely, and
+        # correctly repair the second to point at the shifted "three". The
+        # repaired number (2) happens to equal the *dropped* citation's old
+        # number, pooled on the same line — the round-10 rename-repair
+        # exception must not mistake that coincidence for "the number was
+        # never touched" and run the shift check against a legitimate,
+        # already-correct repair.
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "rename source, drop first citation, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_renamed_doc_with_unchanged_citation_to_a_shrunk_file_is_still_checked(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

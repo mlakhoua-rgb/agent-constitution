@@ -431,8 +431,23 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                     # unedited citation's — check_added_citations only
                     # verifies existence/EOF bounds, not a shift, so this is
                     # the only place that number ever gets shift-checked.
+                    #
+                    # Only when it's unambiguous, though: `local_citations`
+                    # pools every citation on the line/block, so if the old
+                    # path shows up more than once with different numbers
+                    # (e.g. two citations to it on one line, one dropped and
+                    # the other correctly repaired to a *different* number
+                    # that just happens to match the dropped one's), there's
+                    # no way to tell which occurrence the repair replaced.
+                    # citation_line_shifted can't verify a number's
+                    # correctness either — it just flags anything past a
+                    # shift boundary — so applying it here would false-alarm
+                    # on a legitimate repair about as often as it would
+                    # catch a real miss. Require exactly one prior
+                    # occurrence of the old path, with a matching number.
                     old_cited = rename_map(base).get(cited)
-                    rename_repaired_only = old_cited and (old_cited, num) in local_citations
+                    old_cited_nums = {n for p, n in local_citations if p == old_cited}
+                    rename_repaired_only = old_cited and old_cited_nums == {num}
                     if not rename_repaired_only:
                         continue
                 if cited in change.deleted:

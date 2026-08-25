@@ -338,3 +338,25 @@ Both are fixed and regression-tested; `python -m unittest discover -s tests -v` 
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-10 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_state_contract.py`, `tests/test_review_zero.py`, this handoff.
+
+## Round 11 — Codex re-review on commit `d9d1ce6` found one more issue
+
+- **P1 — the round-10 rename-repair exception could false-alarm on a legitimate repair.** When a
+  single line carries *two* citations to the same (renamed) path with different numbers — one
+  dropped in this PR, the other correctly repaired to a *different* number that just happens to
+  equal the dropped one's — `local_citations` pools both old occurrences together, so the round-10
+  check (`old_cited` present with a matching number) fires on the coincidental match even though it
+  came from the wrong occurrence. Unlike round 9's line-identity ambiguity, checking here isn't a
+  safe default: `citation_line_shifted` can't verify a number's correctness, only whether *some*
+  restructuring happened before it, so applying it to an already-correct, intentionally-repaired
+  number is a near-certain false positive, not a defensible fail-closed choice. The exception is now
+  gated on the old path appearing *exactly once* in the local pool, with a matching number — genuinely
+  ambiguous cases (multiple prior occurrences of the renamed path) fall back to being fully exempted,
+  trusting that an author who is clearly already mid-repair recalculated the number, rather than
+  flagging a rename that plausibly just forgot to touch it. See `review_zero.py`,
+  `test_rename_repair_exception_is_not_confused_by_a_second_citation_on_the_line`.
+
+Fixed and regression-tested; `python -m unittest discover -s tests -v` (33/33) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-11 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
