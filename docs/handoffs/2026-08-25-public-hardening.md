@@ -360,3 +360,36 @@ Fixed and regression-tested; `python -m unittest discover -s tests -v` (33/33) a
 `python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
 
 Codex round-11 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.
+
+## Round 12 — Codex re-review on commit `457c786` found three more issues
+
+- **P1 — `citation_line_shifted` flagged on the first unequal hunk instead of the net cumulative
+  offset.** A deletion earlier in the file followed by an insertion also earlier (but later than the
+  deletion) can cancel out — the cited line ends up at exactly the position it would be at with no
+  edits at all — yet the old check returned `True` as soon as it saw *any* single hunk with
+  `old_count != new_count` before the citation, regardless of what came after. Rewrote it to sum every
+  preceding hunk's `(new_count - old_count)` delta and only flag on a nonzero *total*, plus an
+  unconditional flag when the citation's own line sits directly inside a hunk's new range (a genuine
+  edit there, not a position question). See `review_zero.py`,
+  `test_offset_canceling_hunks_do_not_false_positive_on_an_unaffected_citation`.
+- **P1 — the round-11 disambiguation only covered the rename-repair exception, not the general match.**
+  A citation whose *path was never renamed* but whose repaired number happens to equal a different,
+  dropped citation's old number on the same line went through the plain `(cited, num) in local_citations`
+  membership check, which round 11 never touched — so the exact ambiguity round 11 fixed for renames
+  was still open for same-path repairs. Unified the whole citation-matching rule: a citation counts as
+  confidently inherited only when its path — current or pre-rename — appears in the local pool exactly
+  once with a matching number, whether or not a rename is involved. See `review_zero.py`,
+  `test_multiple_citations_to_same_unrenamed_path_on_one_line_exempts_ambiguous_repair`.
+- **P1 — the round-11 "exactly one" check used a set, silently collapsing true duplicates.** Two
+  byte-identical old citations to the same path and number pooled on one line still counted as "one
+  distinct value," so the round-11 exception treated them as confidently unambiguous — but a repair
+  replacing one of two duplicates is exactly as unattributable as replacing one of two differently
+  numbered citations; the fix needs occurrence counts, not distinct values. `doc_reference_pools` now
+  returns citations as a list (preserving duplicates) instead of a set, and the unified match above
+  requires the raw occurrence list — not a deduplicated set — to equal exactly `[num]`. See
+  `review_zero.py`, `test_duplicate_identical_citations_pooled_together_are_not_treated_as_singular`.
+
+All three are fixed and regression-tested; `python -m unittest discover -s tests -v` (36/36) and
+`python scripts/review_zero.py --base origin/main` are clean (only the pre-existing size WARN).
+
+Codex round-12 fixes are validated by local regression tests and `review_zero.py` · STATUS: VALIDATED · evidence: `tests/test_review_zero.py`, this handoff.

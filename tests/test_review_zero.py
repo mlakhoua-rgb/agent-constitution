@@ -152,6 +152,75 @@ class ReviewZeroImpactTests(unittest.TestCase):
         result = self.review(root, base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_offset_canceling_hunks_do_not_false_positive_on_an_unaffected_citation(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text("See src/foo.py:5.\n", encoding="utf-8")
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Delete the first line (net -1 before line 5) and insert a new
+        # line right after "two" (net +1, also before line 5) — the two
+        # offsets exactly cancel, so "five" is still at line 5 and the
+        # unchanged citation continues to name exactly the same content.
+        # Flagging on the first unequal hunk alone (ignoring that a later
+        # one cancels it out) would false-positive here.
+        (root / "src" / "foo.py").write_text(
+            "two\nINSERTED\nthree\nfour\nfive\n", encoding="utf-8",
+        )
+        self.commit(root, "delete first line, insert a line that cancels the offset")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_multiple_citations_to_same_unrenamed_path_on_one_line_exempts_ambiguous_repair(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and src/foo.py:3 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # No rename this time — delete the source's first line (shifting
+        # "three" from line 3 to line 2), drop the first citation, and
+        # correctly repair the second to point at the shifted "three".
+        # The repaired number coincidentally equals the dropped citation's
+        # old number, both pooled on the same line to the same path — the
+        # same ambiguity round 11 fixed for a *renamed* path must also
+        # apply when no rename is involved at all.
+        (root / "src" / "foo.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/foo.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "drop first citation, repair second")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_duplicate_identical_citations_pooled_together_are_not_treated_as_singular(self) -> None:
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "src").mkdir()
+        (root / "docs" / "a.md").write_text(
+            "See src/foo.py:2 and again src/foo.py:2 for details.\n", encoding="utf-8",
+        )
+        (root / "src" / "foo.py").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        base = self.commit(root, "base")
+        # Rename the source, delete its first line (shifting "three" from
+        # line 3 to line 2), and repair the surviving citation to point at
+        # the shifted "three". A set of distinct numbers would collapse
+        # the two duplicate old "src/foo.py:2" citations into one value
+        # and treat that as confident, unambiguous provenance for the
+        # repair — but there are genuinely two raw occurrences pooled
+        # together, so the repair's true source is exactly as unknowable
+        # as it would be with two *different* old numbers.
+        (root / "src" / "foo.py").rename(root / "src" / "bar.py")
+        (root / "src" / "bar.py").write_text("two\nthree\nfour\n", encoding="utf-8")
+        (root / "docs" / "a.md").write_text("See src/bar.py:2 for details.\n", encoding="utf-8")
+        self.commit(root, "rename source, repair citation to shifted content")
+
+        result = self.review(root, base)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_rename_repair_exception_is_not_confused_by_a_second_citation_on_the_line(self) -> None:
         root = self.make_repo()
         (root / "docs").mkdir()

@@ -144,12 +144,16 @@ def file_hunks(base: str, path: str) -> tuple[tuple[int, int, int, int], ...]:
 
 
 @lru_cache(maxsize=None)
-def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, frozenset] | None]:
+def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, list] | None]:
     """For each HEAD line number (1-indexed) in `doc`: either None,
     meaning the line is byte-identical to its base counterpart — trust
     every reference on it outright — or (targets, citations): the link
     targets and (path, num) citation pairs a reference on that exact
-    line may draw "inherited from base" status from.
+    line may draw "inherited from base" status from. `citations` is a
+    list, not a set — duplicate occurrences of the same (path, num) pair
+    are preserved rather than collapsed, since callers need to tell "this
+    path was cited exactly once here" apart from "cited more than once,"
+    even when every occurrence happens to carry the same number.
 
     Base content is fetched directly via the document's own base path,
     resolved through the rename map when the doc itself was renamed —
@@ -180,7 +184,7 @@ def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, froze
             if clean
         )
 
-    pools: dict[int, tuple[frozenset, frozenset] | None] = {}
+    pools: dict[int, tuple[frozenset, list] | None] = {}
     matcher = difflib.SequenceMatcher(None, base_lines, head_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -189,7 +193,7 @@ def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, froze
         elif tag == "replace" and (i2 - i1) == (j2 - j1):
             for k in range(i2 - i1):
                 old_line = base_lines[i1 + k]
-                pools[j1 + k + 1] = (targets_of(old_line), frozenset(CITATION_RE.findall(old_line)))
+                pools[j1 + k + 1] = (targets_of(old_line), CITATION_RE.findall(old_line))
         elif j2 > j1:
             # insert, delete-with-no-new-side, or a replace with an uneven
             # line count on each side: no reliable per-line correspondence
@@ -198,31 +202,43 @@ def doc_reference_pools(base: str, doc: str) -> dict[int, tuple[frozenset, froze
             # line in it — a documented, rare residual imprecision rather
             # than silently trusting nothing or everything.
             combined = "\n".join(base_lines[i1:i2])
-            pool = (targets_of(combined), frozenset(CITATION_RE.findall(combined)))
+            pool = (targets_of(combined), CITATION_RE.findall(combined))
             for j in range(j1, j2):
                 pools[j + 1] = pool
     return pools
 
 
 def citation_line_shifted(base: str, path: str, num: int) -> bool:
-    """True if a net line-count change at or before `num` could have moved
-    what that line number now points at, even though `num` is still within
-    the new EOF — e.g. deleting an earlier line shifts every later line up
-    by one, so an unchanged citation number now names different content."""
+    """True if `num` names different content in HEAD than it did at `base`
+    — either because a hunk directly rewrote that exact line, or because
+    the *net* line-count change from every hunk strictly before it is
+    nonzero, even though `num` is still within the new EOF.
+
+    Sums every preceding hunk's (new_count - old_count) delta rather than
+    returning as soon as any single unequal hunk precedes `num`: a
+    deletion followed by an insertion earlier in the file can cancel out
+    (net delta 0), leaving a citation past both completely unaffected —
+    flagging on the first unequal hunk alone would false-positive on
+    that offset-canceling case."""
+    cumulative = 0
     for _old_start, old_count, new_start, new_count in file_hunks(base, path):
-        if old_count == new_count:
-            continue
+        if new_count > 0 and new_start <= num < new_start + new_count:
+            # The cited line itself sits inside this hunk's new range —
+            # a direct edit, so its content did change, regardless of any
+            # cancellation elsewhere.
+            return True
         # A pure deletion (new_count == 0) anchors new_start on the new-file
         # line *preceding* the removed content — e.g. deleting old line 4
         # from a file produces `@@ -4 +3,0 @@`, meaning the cut sits strictly
         # after line 3, not at-or-before it. Anything up to and including
-        # new_start is untouched; only lines after it can have shifted.
-        # A hunk that adds content (new_count > 0) instead spans real new
-        # lines starting at new_start, so that boundary is inclusive there.
+        # new_start is untouched by this hunk; only lines after it can
+        # have shifted. A hunk that adds content (new_count > 0) instead
+        # spans real new lines starting at new_start, so that boundary is
+        # inclusive there.
         boundary = new_start if new_count > 0 else new_start + 1
         if num >= boundary:
-            return True
-    return False
+            cumulative += new_count - old_count
+    return cumulative != 0
 
 
 def added_lines(base: str) -> dict[str, list[tuple[int, str]]]:
@@ -416,39 +432,35 @@ def check_impacted_references(base: str, change: Impact) -> list[Finding]:
                         f"existing link `{target}` targets `{resolved}`, deleted/renamed by this PR",
                     ))
             for cited, num in CITATION_RE.findall(text):
-                if local_citations is not None and (cited, num) not in local_citations:
-                    # Same reasoning as links: an untouched citation carries
-                    # the exact same (path, line-number) pair over from this
-                    # exact line's base provenance. A changed one — including
-                    # a repair the PR made to a citation shifted by its own
-                    # earlier edit — won't match and is already covered by
-                    # check_added_citations.
+                if local_citations is not None:
+                    # Trust this citation as inherited from base only when
+                    # its path — either as cited here, or as it stood
+                    # before a rename this PR made — appears in the local
+                    # pool EXACTLY ONCE (raw occurrences, not distinct
+                    # numbers: two identical duplicate citations still
+                    # count as two) and that one occurrence's number
+                    # matches. A repair the PR made to a citation shifted
+                    # by its own earlier edit, or to a path this PR
+                    # renamed, won't match and is already covered by
+                    # check_added_citations for anything beyond the
+                    # exactly-inherited case below.
                     #
-                    # One exception: if the cited *path* was itself renamed
-                    # and the author correctly updated the citation to the
-                    # new path but left the *line number* untouched, the
-                    # number's validity is still exactly as inherited as an
-                    # unedited citation's — check_added_citations only
-                    # verifies existence/EOF bounds, not a shift, so this is
-                    # the only place that number ever gets shift-checked.
-                    #
-                    # Only when it's unambiguous, though: `local_citations`
-                    # pools every citation on the line/block, so if the old
-                    # path shows up more than once with different numbers
-                    # (e.g. two citations to it on one line, one dropped and
-                    # the other correctly repaired to a *different* number
-                    # that just happens to match the dropped one's), there's
-                    # no way to tell which occurrence the repair replaced.
-                    # citation_line_shifted can't verify a number's
+                    # Any other pooled occurrence of the same path — even
+                    # without a rename, even a byte-identical duplicate —
+                    # means we can't tell a genuine carryover from a stale
+                    # leftover that coincidentally matches a *different*
+                    # occurrence's old text (e.g. two citations to one path
+                    # on a line, one dropped, the other correctly repaired
+                    # to a number that happens to equal the dropped one's).
+                    # `citation_line_shifted` can't verify a number's
                     # correctness either — it just flags anything past a
-                    # shift boundary — so applying it here would false-alarm
-                    # on a legitimate repair about as often as it would
-                    # catch a real miss. Require exactly one prior
-                    # occurrence of the old path, with a matching number.
+                    # shift point — so checking an ambiguous match would
+                    # false-alarm on a legitimate repair about as often as
+                    # it'd catch a real miss; exempt it instead.
                     old_cited = rename_map(base).get(cited)
-                    old_cited_nums = {n for p, n in local_citations if p == old_cited}
-                    rename_repaired_only = old_cited and old_cited_nums == {num}
-                    if not rename_repaired_only:
+                    candidate_paths = {cited} | ({old_cited} if old_cited else set())
+                    matches = [n for p, n in local_citations if p in candidate_paths]
+                    if matches != [num]:
                         continue
                 if cited in change.deleted:
                     found.append(Finding(
