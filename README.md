@@ -8,6 +8,24 @@ This is not a prompt collection and not an agent framework. It is the **governan
 sits above whichever agents you use — the documents, contracts, tests, and CI gates that make agent
 output reviewable, attributable, and safe to merge.
 
+## Install Stage 1 into an existing repo
+
+```bash
+git clone https://github.com/metafive-ai/agent-constitution.git
+python agent-constitution/scripts/bootstrap.py --dest /path/to/your/repo
+```
+
+That copies the constitution, decision log, issue templates, and scripts. Existing files are left
+alone unless you pass `--force`. Then:
+
+1. Fill every `<PLACEHOLDER>` in `CLAUDE.md`. Keep it under ~150 lines.
+2. Start `docs/DECISIONS.md` with your **next real decision**. Do not backfill history.
+3. `gh label create truth-gap --color B60205 --description "Two sources of truth disagree"`
+4. `python scripts/session_brief.py`
+
+`--stage 2|3|4` adds the later layers. Read [`ADOPTION.md`](ADOPTION.md) before turning CI gates on.
+A solo project with one agent and reversible changes should skip this repo.
+
 ---
 
 ## The problem it solves
@@ -211,6 +229,7 @@ docs/
   workflows/state-guard.yml                Enforces write-with-the-work
   workflows/review-zero.yml                Runs tests + mechanical Round-0 gate in CI
 scripts/
+  bootstrap.py                             Copy Stage 1–4 files into an existing product repo
   session_brief.py                         Generated session-start repository/GitHub/CI read
   state_contract.py                        Shared STATE freshness parser
   review_zero.py                           Impact-aware mechanical half of Round 0
@@ -239,17 +258,6 @@ marked `<LIKE THIS>`.
   deliberately scoped. The repo regression-tests the behaviors it claims, but adopters are still
   expected to mine additional checks from *their* own review history rather than treating this as
   a universal verifier.
-
----
-
-## Getting started
-
-1. Read [`ADOPTION.md`](ADOPTION.md) — it gives a staged path rather than an all-at-once install.
-2. Copy `CLAUDE.md` and `AGENTS.md` to your repo root; fill the `<PLACEHOLDERS>`.
-3. Start `docs/DECISIONS.md` with your next real decision. Do not backfill history.
-4. Run `python -m unittest discover -s tests -v` and `python scripts/review_zero.py` after adapting
-   the reference implementation.
-5. Add `state-guard.yml` only once the state ledger is genuinely being used.
 
 ---
 
