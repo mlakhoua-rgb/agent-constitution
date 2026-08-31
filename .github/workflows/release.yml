@@ -10,15 +10,17 @@ name: Release
 # the two impossible to drift apart silently.
 #
 # BEFORE TAGGING: promote CHANGELOG.md's [Unreleased] section to the version you
-# are about to tag. This job fails when the tag has no matching section, so a tag
-# pushed against [Unreleased] cuts no release at all. Then:
-#   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+# are about to tag and merge that PR. This job fails when the tag has no matching
+# section, so a tag pushed against [Unreleased] cuts no release at all.
+#
+# Then tag THAT PR's MERGE COMMIT BY SHA — never local HEAD, never origin/main:
+#   git fetch origin && git tag -a v0.2.0 -m "v0.2.0" <sha> && git push origin v0.2.0
+# HEAD can sit ahead of the remote, and origin/main moves on if another PR merges
+# first; either ships a tag carrying changes the published notes do not describe.
 #
 # A tag on a commit that predates this file runs nothing — GitHub uses the workflow
 # as it exists at the tagged commit. Publish any such historical release by hand.
-# That failure is silent: no run, no release, no error, and a stale local clone is
-# enough to cause it. Tag the remote-tracking ref by name rather than local HEAD:
-#   git fetch origin && git tag -a v0.2.0 -m "v0.2.0" origin/main
+# That failure is silent: no run, no release, no error.
 # See "Cutting a release" in CHANGELOG.md.
 
 on:

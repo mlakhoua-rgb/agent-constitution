@@ -50,27 +50,32 @@ Versions apply to the framework's **contracts**, not to lines of code:
 
 ## Cutting a release
 
-1. Promote `[Unreleased]` to the version you are about to tag, date it, and merge that first.
-2. Fetch, and read what the **remote** actually has:
+1. Promote `[Unreleased]` to the version you are about to tag, date it, and merge that PR.
+   **Its merge commit is the release.** Note that SHA.
+2. Fetch, and confirm the SHA is on the default branch:
 
    ```bash
-   git fetch origin && git log -1 --oneline origin/main
+   git fetch origin
+   git merge-base --is-ancestor <sha> origin/main \
+     && git log -1 --oneline <sha> || echo "STOP — not on origin/main"
    ```
 
-3. Tag that ref by name — never your local `HEAD` — and push:
+3. Tag **that SHA** — never `HEAD`, never a moving ref — and push:
 
    ```bash
-   git tag -a v0.2.0 -m "v0.2.0" origin/main && git push origin v0.2.0
+   git tag -a v0.2.0 -m "v0.2.0" <sha> && git push origin v0.2.0
    ```
 
 Step 1 is not optional bookkeeping. `.github/workflows/release.yml` publishes the section matching
 the tag and **fails when there is none**, so a tag pushed against `[Unreleased]` cuts no release at
 all.
 
-Step 3 names `origin/main` because local state cannot be trusted to stand in for it. `git pull`
-reports *"Already up to date"* when your branch is **ahead**, so a commit you never pushed survives
-an eyeball check and gets tagged; `--ff-only` does not reject that case either. Tagging the
-remote-tracking ref makes your working tree irrelevant to what ships.
+Step 3 names a SHA because both of the convenient alternatives are wrong. Local `HEAD` can sit
+**ahead** of the remote — `git pull` answers *"Already up to date"* in that case, and `--ff-only`
+does not reject it either, so a commit you never pushed gets tagged. And `origin/main` **moves**: if
+another PR merges between step 1 and step 2, tagging the tip ships changes the frozen notes never
+described, so the `Re-copy` list would under-report and adopters would keep stale files without
+knowing. Pinning the SHA is what makes the tag and the notes describe the same tree.
 
 Step 2 is the one that fails *quietly*. A tag on a commit that predates the workflow produces **no
 run, no release, and no error** — GitHub uses the workflow as it exists at the tagged commit, so
