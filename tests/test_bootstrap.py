@@ -11,6 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.py"
 MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+# A real log entry opens with a concrete date; the template's examples all use the
+# literal `<YYYY-MM-DD>` placeholder, so this tells the two files apart.
+REAL_ENTRY_RE = re.compile(r"^- \*\*\d{4}-\d{2}-\d{2}\*\*", re.MULTILINE)
 
 
 class BootstrapTests(unittest.TestCase):
@@ -58,6 +61,25 @@ class BootstrapTests(unittest.TestCase):
         dest = self.dest()
         self.bootstrap(dest, "--stage", "4")
         self.assertEqual(self.broken_links(dest / "docs/STATE.md"), [])
+
+    def test_stage1_installs_the_blank_decision_log_not_this_project_log(self) -> None:
+        # docs/DECISIONS.md is this framework's own append-only log; templates/ holds
+        # the blank an adopter gets. Shipping ours would put this project's decisions
+        # in every install, against ADOPTION.md's "do not backfill" rule and the line
+        # bootstrap.py itself prints. Two-sided on purpose: the blank must stay blank
+        # AND our log must stay real, or the split has quietly collapsed again.
+        dest = self.dest()
+        self.bootstrap(dest)
+        installed = (dest / "docs/DECISIONS.md").read_text(encoding="utf-8")
+        self.assertIsNone(
+            REAL_ENTRY_RE.search(installed),
+            "a fresh install must not carry this project's decision entries",
+        )
+        ours = (ROOT / "docs/DECISIONS.md").read_text(encoding="utf-8")
+        self.assertIsNotNone(
+            REAL_ENTRY_RE.search(ours),
+            "this project's own decision log should carry real dated entries",
+        )
 
     def test_existing_index_is_kept_without_force_and_replaced_with_force(self) -> None:
         dest = self.dest()

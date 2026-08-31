@@ -25,6 +25,19 @@ from librarian import build_index
 # quickstart tells not to backfill history.
 GENERATED = "docs/handoffs/INDEX.md"
 
+# Files whose shipped blank lives in templates/ because this project keeps its own
+# instance at the destination path. One rule: templates/ is what an adopter gets;
+# everything else in this tree is ours. Copying our copy would ship this project's
+# decisions into every install — the same defect as copying a generated index, and
+# a direct contradiction of the "do not backfill" line printed below.
+#
+# Cross-references inside a template are written for where the file LANDS, not
+# where it lives, so a relative link cannot resolve in both places. Templates name
+# sibling documents in inline code rather than linking them.
+TEMPLATE_SOURCES = {
+    "docs/DECISIONS.md": "templates/DECISIONS.md",
+}
+
 STAGES: dict[int, tuple[str, ...]] = {
     1: (
         "CLAUDE.md",
@@ -98,7 +111,7 @@ def main() -> int:
     missing: list[str] = []
 
     for rel in files_through(args.stage):
-        src = src_root / rel
+        src = src_root / TEMPLATE_SOURCES.get(rel, rel)
         if not src.exists():
             missing.append(rel)
             continue

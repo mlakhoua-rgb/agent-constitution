@@ -8,7 +8,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from bootstrap import GENERATED, STAGES, TEMPLATE_SOURCES, files_through  # noqa: E402
 from changelog_release_notes import extract  # noqa: E402
+
+# `\Z` matters: the last release's Re-copy section has no heading after it, and
+# without it this check silently skipped the one section nearest the tag.
+RE_COPY_SECTION_RE = re.compile(r"^### Re-copy\n(.*?)(?=^#{2,3} |\Z)",
+                                re.MULTILINE | re.DOTALL)
+# Root-level files count: an early draft required a slash, so a Re-copy line naming
+# `CLAUDE.md` or a nonexistent `missing.md` extracted nothing and passed silently.
+# The extension must start with a letter, or a version like `v0.2.0` reads as a path.
+REPO_PATH_RE = re.compile(r"`([\w.-]+(?:/[\w.-]+)*\.[A-Za-z]\w*)`")
+# Files that became the adopter's the moment they installed them. The changelog
+# preamble lists these under "Never re-copy"; two are derivable from the manifest,
+# the rest are the documents an adopter fills in.
+NEVER_RE_COPY = frozenset({"CLAUDE.md", "AGENTS.md", "docs/STATE.md",
+                           GENERATED, *TEMPLATE_SOURCES})
 
 CHANGELOG = """\
 # Changelog
@@ -87,6 +102,24 @@ class ExtractTests(unittest.TestCase):
         self.assertTrue(versions, "the shipped changelog should carry released versions")
         for version in versions:
             self.assertNotEqual(extract(changelog, version).strip(), "", version)
+
+    def test_re_copy_lines_only_name_files_an_adopter_actually_holds(self) -> None:
+        # A Re-copy line naming a file no stage installs sends the reader looking for
+        # something that is not in their tree — and the whole point of these entries
+        # is that they are actionable. `scripts/bootstrap.py` is run from the clone,
+        # never installed, and was wrongly listed in 0.2.0's first draft.
+        installed = set(files_through(max(STAGES)))
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        for section in RE_COPY_SECTION_RE.findall(changelog):
+            for path in REPO_PATH_RE.findall(section):
+                self.assertIn(
+                    path, installed,
+                    f"a Re-copy line names {path}, which no stage installs",
+                )
+                self.assertNotIn(
+                    path, NEVER_RE_COPY,
+                    f"a Re-copy line names {path}, which the preamble says never to re-copy",
+                )
 
     def test_shipped_changelog_last_section_excludes_link_definitions(self) -> None:
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")

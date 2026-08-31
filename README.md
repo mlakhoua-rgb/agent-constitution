@@ -219,7 +219,7 @@ CHANGELOG.md                               Per-release list of the files adopter
 CONTRIBUTING.md                            The bar for changes to the framework itself
 SECURITY.md                                How to report security issues in the public repo
 docs/
-  DECISIONS.md                             Append-only decision log + entry contract
+  DECISIONS.md                             This project's own append-only decision log
   STATE.md                                 Volatile state ledger + freshness contract
   handoffs/TEMPLATE.md                     Session evidence record
   archive/                                 Read-only history — never current
@@ -242,6 +242,8 @@ scripts/
   review_zero.py                           Impact-aware mechanical half of Round 0
   librarian.py                             Daily freshness / link / orphan / budget pass
   changelog_release_notes.py               Extracts one release's notes for the release workflow
+templates/
+  DECISIONS.md                             The blank decision log Stage 1 installs + entry contract
 tests/
   test_review_zero.py                      Referential-integrity and migration regressions
   test_state_contract.py                   Section and per-workstream TTL regressions
