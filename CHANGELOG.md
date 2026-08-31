@@ -80,8 +80,8 @@ Chaining makes the ancestry check structural instead of advisory.
 
 The failure all of this guards is the silent one. A tag on a commit that predates the workflow
 produces **no run, no release, and no error** — GitHub uses the workflow as it exists at the
-tagged commit, so there is nothing there to report the problem. The fail-closed design in step 1 cannot
-help, because nothing runs to fail.
+tagged commit, so there is nothing there to report the problem. The fail-closed design in step 1
+cannot help, because nothing runs to fail.
 
 > **This is not hypothetical.** The first `v0.2.0` attempt tagged a stale `main` from a clone that
 > had never been pulled, and cut nothing — while printing `* [new tag] v0.2.0 -> v0.2.0`, a line
