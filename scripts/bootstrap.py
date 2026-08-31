@@ -16,13 +16,21 @@ import shutil
 import sys
 from pathlib import Path
 
+from librarian import build_index
+
+# Generated, never copied. docs/handoffs/INDEX.md is derived from the destination's
+# own handoff files; copying this repo's copy hands the adopter a table of rows
+# pointing at handoffs no stage installs — a hard librarian --check failure on a
+# tree that has done nothing wrong, plus this project's history in a repo the
+# quickstart tells not to backfill history.
+GENERATED = "docs/handoffs/INDEX.md"
+
 STAGES: dict[int, tuple[str, ...]] = {
     1: (
         "CLAUDE.md",
         "AGENTS.md",
         "docs/DECISIONS.md",
         "docs/handoffs/TEMPLATE.md",
-        "docs/handoffs/INDEX.md",
         "docs/archive/README.md",
         ".github/ISSUE_TEMPLATE/truth_gap.md",
         ".github/ISSUE_TEMPLATE/backlog_item.md",
@@ -102,9 +110,20 @@ def main() -> int:
         shutil.copy2(src, target)
         copied.append(rel)
 
+    generated: list[str] = []
+    index = dest / GENERATED
+    if index.exists() and not args.force:
+        skipped.append(GENERATED)
+    else:
+        index.parent.mkdir(parents=True, exist_ok=True)
+        index.write_text(build_index(index.parent), encoding="utf-8")
+        generated.append(GENERATED)
+
     print(f"stage {args.stage} → {dest}")
-    print(f"copied  {len(copied)}")
-    print(f"skipped {len(skipped)} (exists; pass --force to replace)")
+    print(f"copied    {len(copied)}")
+    for rel in generated:
+        print(f"generated {rel} (derived from your handoffs, never copied)")
+    print(f"skipped   {len(skipped)} (exists; pass --force to replace)")
     if missing:
         print(f"missing {len(missing)} in source clone:")
         for p in missing:

@@ -38,6 +38,9 @@ PRs here go through the same machinery the repo ships:
   you don't need label permissions — just say in the PR body that project state is unchanged.
 - The PR template's **Round-0 checklist and one-sentence risk statement** are to be filled in,
   not deleted. For docs PRs too: "no runtime verification" never means "claims need no evidence."
+- **If your change touches a file adopters copy, add a `[Unreleased]` entry to
+  [`CHANGELOG.md`](CHANGELOG.md) naming those files.** Adopters have no dependency on this repo;
+  the release notes are the only thing that ever tells them a file they hold is now wrong.
 
 The reference scripts support **Python 3.10+** and use the standard library only. GitHub Actions
 currently exercises them on Python 3.11; compatibility changes should keep the documented floor
