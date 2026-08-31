@@ -32,6 +32,10 @@ instead — or `--force` into a scratch directory and diff it against your repo.
 Scripts, workflows, tests, and the reference documents under `docs/reference/` are safe to replace
 wholesale unless you have customized them.
 
+**`scripts/bootstrap.py` is never in your tree.** No stage installs it — you run it *from* the
+agent-constitution clone. So a release that changes it needs a `git pull` of the clone, not a
+re-copy, and it will never appear in a `Re-copy` line.
+
 ## Watching for releases
 
 GitHub → **Watch** → **Custom** → **Releases**. Without that, the paragraph above is a
@@ -64,7 +68,7 @@ heading before tagging — see **Cutting a release** above.
 
 ### Re-copy
 
-`scripts/bootstrap.py` · `scripts/librarian.py`
+`scripts/librarian.py`
 
 ### Fixed
 
@@ -88,6 +92,13 @@ heading before tagging — see **Cutting a release** above.
 
 ### Changed
 
+- **The blank `DECISIONS.md` that Stage 1 installs now lives in `templates/`,** so this project can
+  keep its own decision log at `docs/DECISIONS.md`. One path was doing two jobs: the constitution
+  requires material decisions to be recorded there, while `bootstrap.py` copied that same file into
+  every adopter tree — so any real entry would have shipped this project's history to everyone
+  installing the framework, contradicting the "Do not backfill" line `bootstrap.py` prints.
+  **Nothing changes for you:** the file still lands at `docs/DECISIONS.md` in your repo, with the
+  same content.
 - **README quickstart says what a correct install looks like.** Its last step,
   `python scripts/session_brief.py`, prints `docs/STATE.md MISSING` because `STATE.md` arrives at
   Stage 4. `ADOPTION.md` explained that; the README — the front door since the one-command install
@@ -104,14 +115,14 @@ so this entry is assembled from the commit record rather than written alongside 
 the file list as authoritative and the summary as INFERRED. Releases from here on are written
 with the change · STATUS: CANDIDATE · evidence: `git log 3c1a2d4..94a2860`.
 
+⚠️ **A `v0.1.0` tag cannot be published by CI.** `94a2860` predates both this file and the release
+workflow, and a tag push runs the workflow *as it exists at that commit* — which is to say, not at
+all. If you want the tag, create its release by hand from this section; `v0.2.0` is the first
+release the workflow can actually cut.
+
 ### Re-copy
 
 Everything — this is the baseline.
-
-⚠️ **A `v0.1.0` tag cannot be published by CI.** `94a2860` predates both this file and
-`.github/workflows/release.yml`, and a tag push runs the workflow *as it exists at that commit* —
-which is to say, not at all. If you want the tag, create its release by hand from this section;
-`v0.2.0` is the first release the workflow can actually cut.
 
 [Unreleased]: https://github.com/metafive-ai/agent-constitution/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/metafive-ai/agent-constitution/compare/v0.1.0...v0.2.0
