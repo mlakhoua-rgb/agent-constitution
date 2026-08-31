@@ -86,9 +86,9 @@ heading before tagging — see **Cutting a release** above.
   installs — so every Stage 1–3 tree has reported it broken since the framework was published.
 
   ⚠️ **Existing adopters: this one is a hand edit, not a re-copy.** Your `docs/DECISIONS.md` is
-  your log and must never be overwritten. Open it, find the line reading
-  `— see [STATE.md](STATE.md).` under "Never capped", and replace that link with the file name in
-  backticks. New installs get the corrected template automatically.
+  your log and must never be overwritten. Open it, find the line under "Never capped" that links
+  `STATE.md` as a sibling document, and replace that link with the file name in backticks. New
+  installs get the corrected template automatically.
 
 ### Added
 
