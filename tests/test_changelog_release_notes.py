@@ -8,14 +8,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from bootstrap import STAGES, files_through  # noqa: E402
+from bootstrap import GENERATED, STAGES, TEMPLATE_SOURCES, files_through  # noqa: E402
 from changelog_release_notes import extract  # noqa: E402
 
 # `\Z` matters: the last release's Re-copy section has no heading after it, and
 # without it this check silently skipped the one section nearest the tag.
 RE_COPY_SECTION_RE = re.compile(r"^### Re-copy\n(.*?)(?=^#{2,3} |\Z)",
                                 re.MULTILINE | re.DOTALL)
-REPO_PATH_RE = re.compile(r"`([\w.-]+(?:/[\w.-]+)+\.\w+)`")
+# Root-level files count: an early draft required a slash, so a Re-copy line naming
+# `CLAUDE.md` or a nonexistent `missing.md` extracted nothing and passed silently.
+# The extension must start with a letter, or a version like `v0.2.0` reads as a path.
+REPO_PATH_RE = re.compile(r"`([\w.-]+(?:/[\w.-]+)*\.[A-Za-z]\w*)`")
+# Files that became the adopter's the moment they installed them. The changelog
+# preamble lists these under "Never re-copy"; two are derivable from the manifest,
+# the rest are the documents an adopter fills in.
+NEVER_RE_COPY = frozenset({"CLAUDE.md", "AGENTS.md", "docs/STATE.md",
+                           GENERATED, *TEMPLATE_SOURCES})
 
 CHANGELOG = """\
 # Changelog
@@ -107,6 +115,10 @@ class ExtractTests(unittest.TestCase):
                 self.assertIn(
                     path, installed,
                     f"a Re-copy line names {path}, which no stage installs",
+                )
+                self.assertNotIn(
+                    path, NEVER_RE_COPY,
+                    f"a Re-copy line names {path}, which the preamble says never to re-copy",
                 )
 
     def test_shipped_changelog_last_section_excludes_link_definitions(self) -> None:

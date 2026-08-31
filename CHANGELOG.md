@@ -81,6 +81,14 @@ heading before tagging — see **Cutting a release** above.
   explicitly tells you not to backfill. `bootstrap.py` now generates the index from the
   destination's own handoffs; `librarian.build_index` takes the directory to render. Regression
   test: `tests/test_bootstrap.py`.
+- **The shipped `DECISIONS.md` no longer carries a link that is broken until Stage 4.** It
+  referenced `STATE.md` as a sibling, which resolves to `docs/STATE.md` — a file Stage 4
+  installs — so every Stage 1–3 tree has reported it broken since the framework was published.
+
+  ⚠️ **Existing adopters: this one is a hand edit, not a re-copy.** Your `docs/DECISIONS.md` is
+  your log and must never be overwritten. Open it, find the line reading
+  `— see [STATE.md](STATE.md).` under "Never capped", and replace that link with the file name in
+  backticks. New installs get the corrected template automatically.
 
 ### Added
 
@@ -97,8 +105,8 @@ heading before tagging — see **Cutting a release** above.
   requires material decisions to be recorded there, while `bootstrap.py` copied that same file into
   every adopter tree — so any real entry would have shipped this project's history to everyone
   installing the framework, contradicting the "Do not backfill" line `bootstrap.py` prints.
-  **Nothing changes for you:** the file still lands at `docs/DECISIONS.md` in your repo, with the
-  same content.
+  **The move itself changes nothing for you:** the file still lands at `docs/DECISIONS.md`. The
+  link fix below is the part that needs your hand.
 - **README quickstart says what a correct install looks like.** Its last step,
   `python scripts/session_brief.py`, prints `docs/STATE.md MISSING` because `STATE.md` arrives at
   Stage 4. `ADOPTION.md` explained that; the README — the front door since the one-command install
@@ -115,8 +123,8 @@ so this entry is assembled from the commit record rather than written alongside 
 the file list as authoritative and the summary as INFERRED. Releases from here on are written
 with the change · STATUS: CANDIDATE · evidence: `git log 3c1a2d4..94a2860`.
 
-⚠️ **A `v0.1.0` tag cannot be published by CI.** `94a2860` predates both this file and the release
-workflow, and a tag push runs the workflow *as it exists at that commit* — which is to say, not at
+⚠️ **A `v0.1.0` tag cannot be published by CI.** `94a2860` predates both this file and the
+release workflow, and a tag push runs the workflow *as it exists at that commit* — that is, not at
 all. If you want the tag, create its release by hand from this section; `v0.2.0` is the first
 release the workflow can actually cut.
 
