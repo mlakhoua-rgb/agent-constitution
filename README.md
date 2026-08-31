@@ -23,6 +23,11 @@ alone unless you pass `--force`. Then:
 3. `gh label create truth-gap --color B60205 --description "Two sources of truth disagree"`
 4. `python scripts/session_brief.py`
 
+Step 4 will print `docs/STATE.md MISSING`, and `librarian.py --check` will exit non-zero for the
+same reason. That is the install working, not failing: `STATE.md` and its CI gate arrive at
+Stage 4, and these scripts are built to **state an absence rather than imply a value** — the
+alternative is a brief that quietly reads as "state is fine" when there is no state file at all.
+
 `--stage 2|3|4` adds the later layers. Read [`ADOPTION.md`](ADOPTION.md) before turning CI gates on.
 A solo project with one agent and reversible changes should skip this repo.
 
@@ -210,6 +215,7 @@ It closes with two failure taxonomies that are, for most teams, the immediately 
 CLAUDE.md                                  Canonical constitution template (vendor-neutral content)
 AGENTS.md                                  Tool-neutral entry point (points at the constitution)
 ADOPTION.md                                How to adopt incrementally — read this second
+CHANGELOG.md                               Per-release list of the files adopters must re-copy
 CONTRIBUTING.md                            The bar for changes to the framework itself
 SECURITY.md                                How to report security issues in the public repo
 docs/
@@ -228,15 +234,19 @@ docs/
   ISSUE_TEMPLATE/backlog_item.md
   workflows/state-guard.yml                Enforces write-with-the-work
   workflows/review-zero.yml                Runs tests + mechanical Round-0 gate in CI
+  workflows/release.yml                    Publishes the CHANGELOG section for a `v*` tag
 scripts/
   bootstrap.py                             Copy Stage 1–4 files into an existing product repo
   session_brief.py                         Generated session-start repository/GitHub/CI read
   state_contract.py                        Shared STATE freshness parser
   review_zero.py                           Impact-aware mechanical half of Round 0
   librarian.py                             Daily freshness / link / orphan / budget pass
+  changelog_release_notes.py               Extracts one release's notes for the release workflow
 tests/
   test_review_zero.py                      Referential-integrity and migration regressions
   test_state_contract.py                   Section and per-workstream TTL regressions
+  test_bootstrap.py                        A fresh install installs no broken references
+  test_changelog_release_notes.py          Release-notes extraction regressions
 ```
 
 Every template is written to be **adopted and edited**, not read and admired. Placeholders are
@@ -258,6 +268,15 @@ marked `<LIKE THIS>`.
   deliberately scoped. The repo regression-tests the behaviors it claims, but adopters are still
   expected to mine additional checks from *their* own review history rather than treating this as
   a universal verifier.
+
+---
+
+## Staying current
+
+The framework is distributed **by copy**, so nothing in your repo knows when a defect here is
+fixed. Watch this repo (**Watch → Custom → Releases**) and read
+[`CHANGELOG.md`](CHANGELOG.md) — every entry names the files to re-copy, and the ones you should
+never re-copy because they became yours at install.
 
 ---
 

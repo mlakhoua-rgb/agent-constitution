@@ -92,10 +92,16 @@ def replace_auto_block(text: str, block: str) -> tuple[str, bool]:
     return f"{pre}{AUTO_START}\n{block}\n{AUTO_END}{post}", True
 
 
-def build_index() -> str:
+def build_index(handoffs: Path = HANDOFFS) -> str:
+    """Render the handoff index for `handoffs`.
+
+    Parameterized because `scripts/bootstrap.py` must generate this file for the
+    *destination* repo. Copying this repo's INDEX.md instead would hand every
+    adopter a generated file listing handoffs their tree does not contain.
+    """
     rows: list[str] = []
-    if HANDOFFS.exists():
-        for path in sorted(HANDOFFS.glob("*.md"), reverse=True):
+    if handoffs.exists():
+        for path in sorted(handoffs.glob("*.md"), reverse=True):
             if path.name in {"INDEX.md", "TEMPLATE.md"}:
                 continue
             match = HANDOFF_NAME_RE.match(path.name)

@@ -178,6 +178,16 @@ couldn't look." This one rule prevents a large class of confident-falsehood fail
 
 ---
 
+## Staying current after you adopt
+
+You copied these files; you did not depend on them. Nothing in your repo will ever tell you a
+script here was fixed, so **Watch → Custom → Releases** on this repo is part of adopting it, not
+an extra. [`CHANGELOG.md`](CHANGELOG.md) names the files each release requires you to re-copy —
+and the ones that stopped being ours the moment you installed them (`CLAUDE.md`,
+`docs/DECISIONS.md`, `docs/STATE.md`, `docs/handoffs/INDEX.md`).
+
+---
+
 ## Things to drop without guilt
 
 - **The size and TTL budgets**, until a doc actually gets unwieldy. Premature budgets are noise.

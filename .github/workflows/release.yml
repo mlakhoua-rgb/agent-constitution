@@ -1,0 +1,51 @@
+name: Release
+
+# Publishes the CHANGELOG section matching a pushed `v*` tag as the GitHub Release
+# body, and FAILS the release when the tag has no section.
+#
+# WHY THE FAILURE MATTERS: this framework is distributed by copy, so a release is
+# the only channel that tells an adopter which files to re-copy. A release
+# published with an empty or stale body is worse than none — it is a notification
+# that reads as "nothing you need to do." Coupling the body to the changelog makes
+# the two impossible to drift apart silently.
+#
+# SETUP: nothing. Tag and push:
+#   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish release notes from CHANGELOG.md
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python scripts/changelog_release_notes.py --version "$TAG" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md"
