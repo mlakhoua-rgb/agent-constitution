@@ -17,8 +17,9 @@ name: Release
 # A tag on a commit that predates this file runs nothing — GitHub uses the workflow
 # as it exists at the tagged commit. Publish any such historical release by hand.
 # That failure is silent: no run, no release, no error, and a stale local clone is
-# enough to cause it. Run `git checkout main && git pull && git log -1` before
-# tagging; see "Cutting a release" in CHANGELOG.md.
+# enough to cause it. Tag the remote-tracking ref by name rather than local HEAD:
+#   git fetch origin && git tag -a v0.2.0 -m "v0.2.0" origin/main
+# See "Cutting a release" in CHANGELOG.md.
 
 on:
   push:

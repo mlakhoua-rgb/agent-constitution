@@ -50,24 +50,38 @@ Versions apply to the framework's **contracts**, not to lines of code:
 
 ## Cutting a release
 
-1. Promote `[Unreleased]` to the version you are about to tag, and date it.
-2. **Check what you are about to tag** — `git checkout main && git pull`, then `git log -1`.
-3. Tag that exact commit and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0`.
+1. Promote `[Unreleased]` to the version you are about to tag, date it, and merge that first.
+2. Fetch, and read what the **remote** actually has:
+
+   ```bash
+   git fetch origin && git log -1 --oneline origin/main
+   ```
+
+3. Tag that ref by name — never your local `HEAD` — and push:
+
+   ```bash
+   git tag -a v0.2.0 -m "v0.2.0" origin/main && git push origin v0.2.0
+   ```
 
 Step 1 is not optional bookkeeping. `.github/workflows/release.yml` publishes the section matching
 the tag and **fails when there is none**, so a tag pushed against `[Unreleased]` cuts no release at
 all.
 
-Step 2 is the one that fails *quietly*, and it is the reason this is a numbered procedure rather
-than one command. A tag on a commit that predates the workflow produces **no run, no release, and
-no error** — GitHub uses the workflow as it exists at the tagged commit, so there is nothing there
-to report the problem. A stale local clone is enough to cause it. The fail-closed design in step 1
-cannot help here, because nothing runs to fail. `git log -1` before tagging is the whole guard.
+Step 3 names `origin/main` because local state cannot be trusted to stand in for it. `git pull`
+reports *"Already up to date"* when your branch is **ahead**, so a commit you never pushed survives
+an eyeball check and gets tagged; `--ff-only` does not reject that case either. Tagging the
+remote-tracking ref makes your working tree irrelevant to what ships.
 
-> **Verified the hard way on `v0.2.0`.** The first attempt tagged a stale `main`, silently cut
-> nothing, and looked exactly like success at the terminal: `* [new tag] v0.2.0 -> v0.2.0`. The
-> tell was the object count — a tag on a commit the remote already has writes **one** object, not
-> thirty-seven.
+Step 2 is the one that fails *quietly*. A tag on a commit that predates the workflow produces **no
+run, no release, and no error** — GitHub uses the workflow as it exists at the tagged commit, so
+there is nothing there to report the problem. The fail-closed design in step 1 cannot help, because
+nothing runs to fail.
+
+> **This is not hypothetical.** The first `v0.2.0` attempt tagged a stale `main` from a clone that
+> had never been pulled, and cut nothing — while printing `* [new tag] v0.2.0 -> v0.2.0`, a line
+> indistinguishable from success. Tagging a commit that predates the release workflow yields zero
+> workflow runs and zero releases · STATUS: VALIDATED · evidence:
+> `docs/handoffs/2026-08-31-v0.2.0-release-cut.md`.
 
 ---
 
