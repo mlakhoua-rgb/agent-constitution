@@ -85,8 +85,8 @@ this repository, and pushing one publishes a public GitHub Release — an outwar
 this seat did not take on its own authority. Its Python half is covered by
 `tests/test_changelog_release_notes.py`; its YAML half is unproven until the first tag.
 
-Release workflow YAML is unexecuted and its first run is the real test · STATUS: CANDIDATE ·
-evidence: `.github/workflows/release.yml`.
+Release workflow YAML is unexecuted; its first run is the real test ·
+STATUS: CANDIDATE · evidence: `.github/workflows/release.yml`.
 
 ## Not done
 
