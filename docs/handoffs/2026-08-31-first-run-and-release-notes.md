@@ -72,7 +72,7 @@ Reproduced before the fix and confirmed absent after · STATUS: VALIDATED · evi
 
 ## Verification
 
-- `python -m unittest discover -s tests -v` — 50 tests, all passing (39 pre-existing, 11 added).
+- `python -m unittest discover -s tests -v` — 52 tests, all passing (39 pre-existing, 13 added).
 - The four `tests/test_bootstrap.py` cases were run against the pre-fix `scripts/bootstrap.py`
   from `origin/main`: two fail there, naming `2026-08-25-public-hardening.md` as the broken link.
   A regression test that passes against the bug it describes is not a regression test.
@@ -88,10 +88,38 @@ this seat did not take on its own authority. Its Python half is covered by
 Release workflow YAML is unexecuted; its first run is the real test ·
 STATUS: CANDIDATE · evidence: `.github/workflows/release.yml`.
 
+## Round 1 — Codex review findings closed
+
+Codex reviewed `b3ecd5e` and returned two findings. Both were reproduced before being fixed, and
+both were real.
+
+- **P1 — the one command a maintainer copies verbatim was the one guaranteed to fail.**
+  `.github/workflows/release.yml` documented `git tag -a v0.2.0`, while `CHANGELOG.md` carried only
+  `[Unreleased]` and `[0.1.0]`. Running the documented extraction for `v0.2.0` exited 1, so the
+  first intended release would have cut nothing. The mechanism's own fail-closed design turned the
+  documentation error into a dead end rather than a bad release — which is the right failure, but
+  it is still a failure. `[Unreleased]` is promoted to `[0.2.0]`, the workflow header now states
+  the promote-before-tag step, and `CHANGELOG.md` carries a **Cutting a release** procedure.
+  Regression test: `tests/test_changelog_release_notes.py`, which asserts every version the
+  workflow advertises resolves to notes — it fails against the pre-fix changelog.
+- **P2 — the recommended `v0.1.0` tag would have run nothing at all.** `94a2860` contains neither
+  `CHANGELOG.md` nor `.github/workflows/release.yml`, and a tag push runs the workflow *as it
+  exists at the tagged commit*. Verified with `git ls-tree -r --name-only 94a2860`. The advice is
+  corrected here and in `CHANGELOG.md`: a `v0.1.0` release must be published by hand, and `v0.2.0`
+  is the first release CI can cut.
+
+⚠️ **Against interest:** P2 also caught a false claim in the first draft of this handoff — it
+stated that "the changelog sections for both are in place" when no `[0.2.0]` section existed at
+all. The claim was written from intent rather than from the file, which is precisely the failure
+`CLAUDE.md §Evidence rules` exists to prevent, in the document whose job is to record evidence.
+
+Codex round-1 findings are fixed and regression-tested · STATUS: VALIDATED · evidence:
+`tests/test_changelog_release_notes.py`, `CHANGELOG.md`.
+
 ## Not done
 
-- **No tag was pushed.** Cutting `v0.1.0` at `94a2860` and `v0.2.0` at this change's merge commit
-  is the Owner's call; the changelog sections for both are in place.
+- **No tag was pushed.** Tagging is the Owner's call. `v0.2.0` at this change's merge commit is the
+  first release the workflow can publish; `[0.1.0]` stays a historical record that CI cannot cut.
 - **No CI gate requires a changelog entry.** The requirement is stated in `CONTRIBUTING.md`
   instead. A gate here is defensible and was deliberately not added in the same change as the
   mechanism it would guard.

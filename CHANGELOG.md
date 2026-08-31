@@ -44,9 +44,23 @@ Versions apply to the framework's **contracts**, not to lines of code:
 - **MINOR** — a new mechanism, stage file, or check; adopting it is optional.
 - **PATCH** — a defect fixed with no contract change.
 
+## Cutting a release
+
+1. Promote `[Unreleased]` to the version you are about to tag, and date it.
+2. Tag that exact version and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0`.
+
+Step 1 is not optional bookkeeping. `.github/workflows/release.yml` publishes the section matching
+the tag and **fails when there is none**, so a tag pushed against `[Unreleased]` cuts no release at
+all.
+
 ---
 
 ## [Unreleased]
+
+_Nothing yet._ Add entries here as changes land, then promote this section to a version
+heading before tagging — see **Cutting a release** above.
+
+## [0.2.0] — 2026-08-31
 
 ### Re-copy
 
@@ -94,5 +108,11 @@ with the change · STATUS: CANDIDATE · evidence: `git log 3c1a2d4..94a2860`.
 
 Everything — this is the baseline.
 
-[Unreleased]: https://github.com/metafive-ai/agent-constitution/compare/v0.1.0...HEAD
+⚠️ **A `v0.1.0` tag cannot be published by CI.** `94a2860` predates both this file and
+`.github/workflows/release.yml`, and a tag push runs the workflow *as it exists at that commit* —
+which is to say, not at all. If you want the tag, create its release by hand from this section;
+`v0.2.0` is the first release the workflow can actually cut.
+
+[Unreleased]: https://github.com/metafive-ai/agent-constitution/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/metafive-ai/agent-constitution/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/metafive-ai/agent-constitution/releases/tag/v0.1.0

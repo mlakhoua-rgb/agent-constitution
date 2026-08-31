@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -65,10 +66,31 @@ class ExtractTests(unittest.TestCase):
     def test_non_version_headings_are_not_matched(self) -> None:
         self.assertEqual(extract(CHANGELOG, "How"), "")
 
-    def test_shipped_changelog_has_notes_for_unreleased(self) -> None:
-        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        self.assertNotEqual(extract(text, "Unreleased").strip(), "")
-        self.assertNotIn("releases/tag", extract(text, "0.1.0"))
+    def test_every_version_the_release_workflow_advertises_has_notes(self) -> None:
+        # Codex round 1, P1: release.yml documented `git tag -a v0.2.0` while
+        # CHANGELOG.md held only [Unreleased] and [0.1.0]. Following the documented
+        # command exited 1 and cut no release — the one path a maintainer copies
+        # verbatim was the one path guaranteed to fail.
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        advertised = sorted(set(re.findall(r"git tag -a (v\d[\w.+-]*)", workflow)))
+        self.assertTrue(advertised, "release.yml should document a concrete tag command")
+        for version in advertised:
+            self.assertNotEqual(
+                extract(changelog, version).strip(), "",
+                f"release.yml advertises {version}, which has no CHANGELOG.md section",
+            )
+
+    def test_every_released_section_in_the_shipped_changelog_has_notes(self) -> None:
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        versions = re.findall(r"^## \[(\d[^\]]*)\]", changelog, re.MULTILINE)
+        self.assertTrue(versions, "the shipped changelog should carry released versions")
+        for version in versions:
+            self.assertNotEqual(extract(changelog, version).strip(), "", version)
+
+    def test_shipped_changelog_last_section_excludes_link_definitions(self) -> None:
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertNotIn("releases/tag", extract(changelog, "0.1.0"))
 
 
 if __name__ == "__main__":

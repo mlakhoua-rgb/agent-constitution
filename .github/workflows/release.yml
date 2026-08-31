@@ -9,8 +9,13 @@ name: Release
 # that reads as "nothing you need to do." Coupling the body to the changelog makes
 # the two impossible to drift apart silently.
 #
-# SETUP: nothing. Tag and push:
+# BEFORE TAGGING: promote CHANGELOG.md's [Unreleased] section to the version you
+# are about to tag. This job fails when the tag has no matching section, so a tag
+# pushed against [Unreleased] cuts no release at all. Then:
 #   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+#
+# A tag on a commit that predates this file runs nothing — GitHub uses the workflow
+# as it exists at the tagged commit. Publish any such historical release by hand.
 
 on:
   push:
