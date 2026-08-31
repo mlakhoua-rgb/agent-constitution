@@ -20,7 +20,7 @@ Three properties make this file work, and dropping any one of them breaks it:
    answer.
 2. **Never capped.** A "last N decisions" section silently drops the (N+1)th on every addition.
    If you find yourself wanting a cap, what you actually want is a separate volatile state file
-   — see [`STATE.md`](STATE.md).
+   — see `docs/STATE.md`, which Stage 4 installs.
 3. **Written with the work.** The entry lands in the *same PR* as the change that implements the
    decision. A decision log maintained as a separate chore is a decision log that stops being
    maintained.

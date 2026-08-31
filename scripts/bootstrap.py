@@ -30,6 +30,10 @@ GENERATED = "docs/handoffs/INDEX.md"
 # everything else in this tree is ours. Copying our copy would ship this project's
 # decisions into every install — the same defect as copying a generated index, and
 # a direct contradiction of the "do not backfill" line printed below.
+#
+# Cross-references inside a template are written for where the file LANDS, not
+# where it lives, so a relative link cannot resolve in both places. Templates name
+# sibling documents in inline code rather than linking them.
 TEMPLATE_SOURCES = {
     "docs/DECISIONS.md": "templates/DECISIONS.md",
 }
