@@ -51,11 +51,23 @@ Versions apply to the framework's **contracts**, not to lines of code:
 ## Cutting a release
 
 1. Promote `[Unreleased]` to the version you are about to tag, and date it.
-2. Tag that exact version and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0`.
+2. **Check what you are about to tag** — `git checkout main && git pull`, then `git log -1`.
+3. Tag that exact commit and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0`.
 
 Step 1 is not optional bookkeeping. `.github/workflows/release.yml` publishes the section matching
 the tag and **fails when there is none**, so a tag pushed against `[Unreleased]` cuts no release at
 all.
+
+Step 2 is the one that fails *quietly*, and it is the reason this is a numbered procedure rather
+than one command. A tag on a commit that predates the workflow produces **no run, no release, and
+no error** — GitHub uses the workflow as it exists at the tagged commit, so there is nothing there
+to report the problem. A stale local clone is enough to cause it. The fail-closed design in step 1
+cannot help here, because nothing runs to fail. `git log -1` before tagging is the whole guard.
+
+> **Verified the hard way on `v0.2.0`.** The first attempt tagged a stale `main`, silently cut
+> nothing, and looked exactly like success at the terminal: `* [new tag] v0.2.0 -> v0.2.0`. The
+> tell was the object count — a tag on a commit the remote already has writes **one** object, not
+> thirty-seven.
 
 ---
 
